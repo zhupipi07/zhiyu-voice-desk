@@ -1,0 +1,279 @@
+:root {
+  font:
+    16px/1.55 'Inter',
+    'Microsoft YaHei',
+    system-ui,
+    sans-serif;
+  color: #182d29;
+  background: #f4f6f1;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+header {
+  background: #fff;
+  border-bottom: 1px solid #d6ded4;
+}
+.frame {
+  max-width: 1100px;
+  margin: auto;
+  padding: 0 32px;
+}
+.top,
+.brand,
+.title,
+.row,
+.actions {
+  display: flex;
+  align-items: center;
+}
+.top,
+.row {
+  justify-content: space-between;
+}
+.top {
+  height: 64px;
+}
+.brand {
+  gap: 12px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+}
+.mark {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #176855;
+  color: white;
+  font-size: 17px;
+}
+.env,
+.minor,
+.note,
+#model {
+  color: #586b62;
+  font-size: 0.83rem;
+}
+.title {
+  gap: 18px;
+  margin: 36px 0 22px;
+  align-items: baseline;
+}
+.title span {
+  color: #586b62;
+  font-size: 0.92rem;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: clamp(1.7rem, 4vw, 2.35rem);
+  letter-spacing: -0.035em;
+}
+h2 {
+  font-size: 1.06rem;
+}
+h3 {
+  font-size: 0.94rem;
+  margin-top: 20px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-bottom: 50px;
+}
+.card {
+  min-width: 0;
+  padding: 24px;
+  background: white;
+  border: 1px solid #d7dfd5;
+  border-radius: 16px;
+}
+.card.call {
+  background: linear-gradient(135deg, #fafff9, white 76%);
+}
+aside p,
+aside ol {
+  margin: 16px 0;
+}
+aside li {
+  padding: 0.2rem 0;
+}
+#clock {
+  font-variant-numeric: tabular-nums;
+  color: #536759;
+  font-size: 0.87rem;
+}
+.voice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 20px 0 12px;
+}
+.voice strong {
+  font-size: 1.45rem;
+}
+#wave {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 172px;
+  height: 59px;
+}
+#wave i {
+  background: #49947b;
+  width: 5px;
+  height: 16px;
+  border-radius: 5px;
+}
+#wave i:nth-child(2n) {
+  height: 30px;
+}
+#wave i:nth-child(3n) {
+  height: 42px;
+}
+#wave i:nth-child(4) {
+  height: 54px;
+}
+#wave.live i {
+  animation: pulse 0.85s ease-in-out infinite alternate;
+}
+#wave.live i:nth-child(2n) {
+  animation-delay: -0.45s;
+}
+@keyframes pulse {
+  to {
+    transform: scaleY(0.48);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #wave.live i {
+    animation: none;
+  }
+}
+#notice {
+  min-height: 24px;
+  color: #8b4d1c;
+  font-size: 0.87rem;
+  text-align: center;
+}
+.actions {
+  justify-content: center;
+  gap: 10px;
+  margin: 9px 0 15px;
+}
+button {
+  font: inherit;
+  color: white;
+  background: #176855;
+  border: 1px solid #176855;
+  padding: 0.58rem 1.3rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+button.secondary {
+  color: #314c41;
+  background: #fff;
+  border-color: #b6c7ba;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:focus-visible {
+  outline: 3px solid #cf951f;
+  outline-offset: 2px;
+}
+.call .note {
+  text-align: center;
+}
+.log {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  max-height: 370px;
+  overflow-y: auto;
+}
+.log li,
+dl > div {
+  border-top: 1px solid #e4e9e1;
+  padding: 10px 0;
+}
+.log b {
+  font-size: 0.82rem;
+  color: #35725b;
+  display: inline-block;
+  margin-right: 0.65rem;
+}
+.log li {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.log small {
+  color: #806239;
+}
+.empty {
+  font-size: 0.9rem;
+  color: #6b786d;
+}
+.replay {
+  font-size: 0.75rem;
+  padding: 0.12rem 0.48rem;
+  margin-left: 0.5rem;
+  background: #fff;
+  color: #23593e;
+  border-color: #bdd3c4;
+}
+.compact {
+  font-size: 0.86rem;
+}
+dl {
+  margin: 16px 0 0;
+}
+dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+dt {
+  color: #536759;
+}
+dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+@media (max-width: 690px) {
+  .frame {
+    padding: 0 16px;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .title {
+    margin-top: 23px;
+  }
+  .card {
+    padding: 19px;
+  }
+  .top {
+    height: 54px;
+  }
+  .title span {
+    font-size: 0.78rem;
+  }
+}

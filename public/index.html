@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>智语外呼 · 资审通话测试台</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="frame top">
+        <div class="brand"><span class="mark" aria-hidden="true">声</span>智语外呼</div>
+        <span class="env">本地测试台</span>
+      </div>
+    </header>
+    <main class="frame">
+      <div class="title">
+        <h1>资审模拟通话</h1>
+        <span>POP 商家入驻</span>
+      </div>
+      <div class="grid">
+        <section class="card call">
+          <div class="row">
+            <h2>语音工作台</h2>
+            <time id="clock" aria-label="本次连接用时">00:00</time>
+          </div>
+          <div class="voice">
+            <div id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <strong id="status" role="status">正在检查服务</strong
+            ><span id="model">Qwen-Audio 3.1 Flash</span>
+          </div>
+          <p id="notice" role="status"></p>
+          <div class="actions">
+            <button id="start" disabled>开始模拟通话</button
+            ><button id="end" class="secondary" disabled>挂断</button>
+          </div>
+          <p class="note">麦克风语音发送到百炼。模拟转写与坐席播放片段保存在本机。</p>
+        </section>
+        <aside class="card">
+          <h2>测试者手卡</h2>
+          <p>你扮演 <strong>青禾商贸</strong> 的商家。接通后，等 AI 专员先开口。</p>
+          <ol>
+            <li>核身时回答“我是青禾商贸”。</li>
+            <li>听到第二项时插话问“具体要补哪一页？”</li>
+            <li>听完答复后，可以追问“还有什么没说完？”</li>
+          </ol>
+          <p class="note">另开一通说“你打错了”，可以测试错号分支。</p>
+        </aside>
+        <section class="card">
+          <div class="row">
+            <h2>通话记录</h2>
+            <span class="minor">逐轮转写</span>
+          </div>
+          <ol id="transcript" class="log" aria-live="polite">
+            <li class="empty">接通后的对话将显示在这里。</li>
+          </ol>
+        </section>
+        <section class="card">
+          <div class="row">
+            <h2>办理进度</h2>
+            <span class="minor">合成审核单</span>
+          </div>
+          <dl id="progress"></dl>
+          <h3>工具调用</h3>
+          <ul id="tools" class="log compact"></ul>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/app.mjs"></script>
+  </body>
+</html>
