@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createApp } from '../server.mjs';
 import { MODEL, openStore } from '../src/review.mjs';
+import { VoiceCall } from '../public/realtime.mjs';
 
 const chrome = [
   process.env.CHROME_BIN,
@@ -121,6 +122,27 @@ function installTestPeer() {
     emit({ type: 'response.done', response: { id: rid, status: 'completed', output: [] } });
   }
 }
+
+test('an answered question between materials resumes the next item while other follow-ups stay pending', async () => {
+  const questions = [{ connection: 'conn', turn: 'fee', hasAnswer: false }];
+  const next = { point: 'seal', say: '第二项，请补交盖章页。' };
+  const voice = new VoiceCall({
+    status() {},
+    event: async () => ({ result: { next }, snapshot: { points: [], connection: 'conn', questions,
+      pendingQuestion: questions.at(-1)?.turn } }),
+  });
+  voice.playback.cut = async () => ({ pcm: 'audio' });
+  const requests = [];
+  voice.request = (_instructions, plan) => requests.push(plan.point);
+  const reply = { id: 'reply', epoch: voice.epoch, turn: 'page', text: '页码答复',
+    plan: { ok: true, questionTurn: 'page' }, tools: new Map() };
+  questions.push({ connection: 'conn', turn: 'page', hasAnswer: true });
+  await voice.savePlayback(reply, false, true);
+  assert.deepEqual(requests, []);
+  questions.pop();
+  await voice.savePlayback(reply, false, true);
+  assert.deepEqual(requests, ['seal']);
+});
 
 async function until(fn, label, ms = 12000) {
   const end = Date.now() + ms;
@@ -252,7 +274,8 @@ test(
     await text('progress', '已核实');
     await until(() => run('window.fixture.speaking.includes("第二项")'), 'second material is being played');
     await delay(850);
-    await ask('具体要补哪一页', 'lookup_review_guidance', 'page');
+    // Replay the field failure: the model selected the authorization chain for a page question.
+    await ask('具体要补哪一页', 'lookup_review_guidance', 'chain');
     await text('progress', '已播部分');
     await text('tools', '查询材料依据 · 成功');
     await text('transcript', '按内容认页');

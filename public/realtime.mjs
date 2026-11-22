@@ -311,7 +311,10 @@ export class VoiceCall {
       return;
     this.status('通话中');
     const completed = data.snapshot.points.some((p) => p.id === r.plan.point && p.status === 'complete');
-    const resume = !r.plan.point && this.resumeNeeded && !data.snapshot.pendingQuestion;
+    const answered = r.plan.ok && r.plan.questionTurn && !data.snapshot.questions.some(
+      (q) => q.connection === data.snapshot.connection && q.turn === r.plan.questionTurn
+    );
+    const resume = !r.plan.point && (answered || (this.resumeNeeded && !data.snapshot.pendingQuestion));
     if ((completed || resume) && data.result.next?.point) {
       this.resumeNeeded = false;
       this.request('接着向商家说明下一项，请完整照读：' + data.result.next.say, data.result.next);

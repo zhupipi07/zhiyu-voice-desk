@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "test": "node --test",
-    "eval:callback": "node scripts/evaluate-callback.mjs"
+    "eval:callback": "node scripts/evaluate-callback.mjs",
+    "eval:latency": "node scripts/evaluate-latency.mjs"
   }
 }

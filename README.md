@@ -35,4 +35,8 @@
 
 需要复核时延时，可在接通前勾选「同时保存双方语音」。挂断后从结果页下载逐轮 JSON 和每次连接的 8 kHz WAV，左声道为商家、右声道为浏览器实际放行的坐席语音。JSON 用同一次连接的音频时钟记录断句事件、商家有效音量候选区间、坐席起声、打断停播、工具依据和模拟回执。用时间点减去该连接的 `recording.originMs` 即可定位录音中的毫秒位置。录音片段标记 `finished: false` 表示结尾缺少确认。回听后在导出的记录中填写 `confirmedSpeechEndMs` 和 `firstIntelligibleMs`，两者之差是该轮的 `firstWordLatencyMs`。空值保留为待核对。每次重连独立计时。
 
+运行 `npm run eval:latency -- 通话A.json 通话B.json` 汇总已标注的导出文件，可只传一通。两个标注字段均使用连接音频时钟的毫秒值，从 WAV 读取的位置需加回 `recording.originMs`。输出包含逐轮差值、总体及调工具／未调工具轮次的 P50/P95（按升序取第 ⌈p×n⌉ 项）。开场、抢话和未配对轮次单列；`withoutTimedReply` 统计缺少坐席起声时间的轮次，可能与未配对计数重叠。可计分样本为零时分位数显示 `null`。
+
+运行 `node --test --test-name-pattern "guidance replay" test/review.test.mjs` 可重放 16 条材料查询，复现商家问页码、模型误选授权链路等情形。[技术调研与本轮改动](ARCHITECTURE.md#2026-11-22-对照调研与改动)
+
 `npm test` 覆盖核身门槛、材料查询、错号、播放证据、重复事件、重连和数据库重启，并检查转发给百炼的模型 ID。检测到 Chrome 或 Edge 时还会启动无界面浏览器，使用本地 WebRTC 对端、模拟麦克风和测试音频自动跑一通电话。可用 `CHROME_BIN` 指定浏览器可执行文件。自动化测试不消耗百炼额度；模型的实际听辨、音色和端到端时延需使用队内凭据联测。

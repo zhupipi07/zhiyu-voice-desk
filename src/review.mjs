@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { callbackIntent, deniesIdentity } from './contact.mjs';
+import { guidanceTopic } from './guidance.mjs';
 import { evidenceReport, voiceFrames } from './evidence.mjs';
 
 export const MODEL = 'qwen-audio-3.1-realtime-flash';
@@ -31,7 +32,7 @@ const instructions = [
   '你是京东开放平台资审电话的模拟 AI 专员，使用简短的普通话。来电仅供测试，所有材料均为合成案例。',
   '主动开场说明 AI 身份，请对方主动报出测试商家名称。不得猜测、提示正确名称或索要真实个人信息。',
   '对方报出名称后立即调用 verify_merchant，必须等后端核身成功才解释案情。错号、否认身份就结束告知。',
-  '按工具结果中的 say 说话。如有 point，请完整照读该句，一次只讲一项；系统会安排下一项。不自行编造后续材料。',
+  '按工具结果中的 say 说话。如有 point 或 questionTurn，请完整照读该答复，一次只讲一项。系统会安排下一项。不自行编造后续材料。',
   '被打断后先回答最新追问。问原因、材料、页码、上传路径或能否通过，必须调用 lookup_review_guidance。问还有哪项、要求继续时调用 get_call_progress，再按结果回答。',
   '工具返回无依据就说明需要核实。不能承诺审核通过，不宣称已实际向京麦提交。',
 ].join('\n');
@@ -69,6 +70,8 @@ const matches = (text) =>
 
 const pointScript = (point) => point.prefix + point.requirement;
 const writtenOpinion = materials.map((point) => point.requirement).join('\n');
+const guidanceAnswers = { ...notes, chain: pointScript(materials[0]) };
+const minSpeechMs = (text) => Math.max(500, normalize(text).length * 40);
 
 function questions(s) {
   return s.questions ?? (s.pendingQuestion ? [{
@@ -199,18 +202,20 @@ export function openStore(file) {
         } else result = { ok: false, say: '暂时无法核实，请只说出完整测试商家名称。' };
       } else if (s.identity !== 'verified' || e.name === 'get_call_progress') result = progress(s);
       else if (e.name === 'lookup_review_guidance') {
-        const question = currentSpeech()?.text || '查询材料';
-        const answer =
-          e.topic === 'chain' ? pointScript(materials[0]) : Object.hasOwn(notes, e.topic) ? notes[e.topic] : null;
+        const question = currentSpeech()?.text || '';
+        const topic = guidanceTopic(question, e.topic);
+        const answer = guidanceAnswers[topic];
         result = {
           ok: Boolean(answer),
-          say: answer || '这张模拟单没有对应依据，需要进一步核实。',
-          relatedPoint: e.topic === 'page' ? 'seal' : e.topic === 'chain' ? 'chain' : null,
+          topic,
+          say: answer || '现有资料还不能确定这个问题的答复，我先记为待核实。您可以再具体说一下吗？',
+          relatedPoint: topic === 'page' ? 'seal' : topic === 'chain' ? 'chain' : null,
           source: answer ? '合成资审单 POP-DEMO-018 / v1' : null,
           questionTurn: e.turn,
         };
         s.questions = questions(s).filter((q) => q.turn !== e.turn || q.connection !== s.connection);
-        s.questions.push({ turn: e.turn, connection: s.connection, text: question, hasAnswer: result.ok });
+        s.questions.push({ turn: e.turn, connection: s.connection, text: question, hasAnswer: result.ok,
+          expectedAnswer: answer ?? null });
       } else throw fail(400, '未知业务工具。');
       s.tools.push({ name: e.name, ok: result.ok, turn: e.turn });
       return result;
@@ -234,20 +239,28 @@ export function openStore(file) {
         const words = normalize(e.text);
         const covered = point.terms.every((term) => words.includes(term));
         // A short blip plus an entire generated transcript cannot demonstrate full playback.
-        const minSpeechMs = Math.max(500, normalize(pointScript(point)).length * 40);
-        s.points[point.id] =
-          !e.interrupted && e.drained && audibleMs >= minSpeechMs && covered ? 'complete' : 'partial';
+        // A reply to a question is only loosely related to a material. Its filler alone cannot advance that material.
+        if (!e.questionTurn || words.includes(normalize(point.prefix)) || point.terms.some((term) => words.includes(term))) {
+          s.points[point.id] =
+            !e.interrupted && e.drained && audibleMs >= minSpeechMs(pointScript(point)) && covered ? 'complete' : 'partial';
+        }
       }
       if (
         s.status === 'open' &&
         e.questionTurn &&
         e.drained &&
         !e.interrupted &&
-        audibleMs >= 300 &&
         e.text
-      )
-        s.questions = questions(s).filter((q) =>
-          !(q.hasAnswer && q.turn === e.questionTurn && q.connection === s.connection));
+      ) {
+        const pending = questions(s);
+        const index = pending.findIndex((q) => q.turn === e.questionTurn && q.connection === s.connection);
+        const q = pending[index];
+        if (q?.hasAnswer && q.expectedAnswer &&
+            normalize(e.text) === normalize(q.expectedAnswer) && audibleMs >= minSpeechMs(q.expectedAnswer)) {
+          // Repeating the same question after a reconnect can settle the original follow-up too.
+          s.questions = pending.filter((other, i) => i > index || normalize(other.text) !== normalize(q.text));
+        }
+      }
       return { next: progress(s) };
     } else if (e.type === 'end') {
       if (s.identity === 'verified') s.receipt = writeReceipt(s);

@@ -37,6 +37,7 @@ export function evidenceReport(call, s, events, readAudio) {
     if (e.type === 'transcript') turn(conn, e.turn).transcript = e.text;
     if (e.type === 'tool') turn(conn, e.turn).tools.push({
       id: e.id, name: e.name, atMs: e.atMs ?? null, result: e.result,
+      ...(e.name === 'lookup_review_guidance' && { requestedTopic: e.topic ?? null }),
     });
     if (e.type === 'playback') {
       const reply = { id: e.id, clip: e.clip, text: e.text, firstSoundMs: e.firstSoundMs ?? null,

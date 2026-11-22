@@ -99,6 +99,69 @@ test('material disputes, unresolved questions and callback requests survive subs
   assert.deepEqual(saved.questions.map((q) => q.text), ['公证费要多少？']);
 });
 
+// Keep the merchant's final words fixed while varying the model's proposed tool argument.
+const guidanceCases = [
+  ['要补哪一页？', 'chain', '按内容认页'],
+  ['具体是第几页呢？', 'channel', '按内容认页'],
+  ['授权书要补哪一页？', 'page', '按内容认页'],
+  ['上传到哪里？', 'page', '补充材料入口'],
+  ['盖章页从哪里上传？', 'page', '补充材料入口'],
+  ['我想问，在哪个入口提交？', 'channel', '补充材料入口'],
+  ['授权关系缺的是哪一段？', 'page', '品牌方到经销商'],
+  ['需要谁给谁的授权书？', 'chain', '品牌方到经销商'],
+  ['材料补齐了就一定能过吗？', 'chain', '重新审核'],
+  ['补了就一定通过吗？', 'result', '重新审核'],
+  ['公证费要多少？', 'chain', null],
+  ['呃，具。', 'page', null],
+  ['要补哪页，传到哪里？', 'page', null],
+  ['发票要补哪一页？', 'page', null],
+  ['不是问页码，我想问传到哪里？', 'page', '补充材料入口'],
+  ['不用告诉我传到哪里。', 'channel', null],
+];
+for (const [words, proposed, expected] of guidanceCases) {
+  test('guidance replay / ' + words, (t) => {
+    const { say, tool } = setup(t);
+    tool(say('我是青禾商贸'), 'verify_merchant');
+    const answer = tool(say(words), 'lookup_review_guidance', proposed);
+    assert.equal(answer.ok, expected !== null);
+    if (expected) assert.ok(answer.say.includes(expected), answer.say);
+    else assert.equal(answer.source, null);
+  });
+}
+
+test('a lookup only clears its follow-up after an evidenced answer plays', (t) => {
+  const { say, tool, send } = setup(t);
+  tool(say('我是青禾商贸'), 'verify_merchant');
+  const questionTurn = say('要补哪一页？');
+  const answer = tool(questionTurn, 'lookup_review_guidance', 'page');
+  const playback = { questionTurn, turn: questionTurn, drained: true, interrupted: false,
+    pcm: sound.toString('base64'), text: answer.say };
+  const filler = send('playback', { ...playback, point: answer.relatedPoint, text: '好的，我查一下。' });
+  assert.equal(filler.snapshot.points.find((p) => p.id === 'seal').status, 'pending');
+  for (const change of [{ text: '好的，我查一下。' }, { text: '第一项，请补齐授权链路。' },
+    { text: '不用补。' + answer.say }, { pcm: sound.subarray(0, 8000).toString('base64') },
+    { interrupted: true }, { drained: false }]) {
+    assert.equal(send('playback', { ...playback, ...change }).snapshot.pendingQuestion, '要补哪一页？');
+  }
+  assert.equal(send('playback', playback).snapshot.pendingQuestion, null);
+});
+
+test('the evidence distinguishes the model proposal from the answer used, including across reconnects', (t) => {
+  const { store, call, say, tool, connect, send } = setup(t);
+  tool(say('我是青禾商贸'), 'verify_merchant');
+  const page = say('要补哪一页？');
+  tool(page, 'lookup_review_guidance', 'chain');
+  tool(say('公证费要多少？'), 'lookup_review_guidance', 'unknown');
+  const trace = store.report(call.id, call.token).connections[0].turns.find((r) => r.turn === page).tools[0];
+  assert.deepEqual([trace.requestedTopic, trace.result.topic], ['chain', 'page']);
+  connect();
+  const questionTurn = say('要补哪一页');
+  const answer = tool(questionTurn, 'lookup_review_guidance', 'page');
+  const played = send('playback', { turn: questionTurn, questionTurn, drained: true,
+    interrupted: false, pcm: sound.toString('base64'), text: answer.say });
+  assert.deepEqual(played.snapshot.questions.map((q) => q.text), ['公证费要多少？']);
+});
+
 test('timing export shares the recording clock and keeps unverified latencies empty', (t) => {
   const { store, call, say, send } = setup(t);
   const turn = say('你好');
