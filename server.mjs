@@ -2,10 +2,10 @@ import http from 'node:http';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { openStore, MODEL, fail } from './src/review.mjs';
+import { openStore, MODEL, fail, partialResultExample } from './src/review.mjs';
 
 const files = new Map(
-  ['index.html', 'app.mjs', 'realtime.mjs', 'audio.mjs', 'capture.mjs', 'style.css'].map((name) => [
+  ['index.html', 'app.mjs', 'result.mjs', 'realtime.mjs', 'audio.mjs', 'capture.mjs', 'style.css'].map((name) => [
     '/' + name,
     new URL('./public/' + name, import.meta.url),
   ])
@@ -23,15 +23,23 @@ function validate(e) {
   if (
     !e ||
     !string(e.id, 220) ||
-    !['connect', 'turn', 'transcript', 'tool', 'playback', 'end'].includes(e.type)
+    !['connect', 'turn', 'transcript', 'tool', 'playback', 'end', 'recording', 'marker'].includes(e.type)
   )
     throw fail(400, '无效事件。');
   if (e.type !== 'connect' && !string(e.connection, 80)) throw fail(400, '缺少连接编号。');
-  if (['turn', 'transcript', 'tool'].includes(e.type) && !string(e.turn, 180))
+  if (['turn', 'transcript', 'tool', 'marker'].includes(e.type) && !string(e.turn, 180))
     throw fail(400, '缺少语音轮次。');
   if (e.type === 'transcript' && !string(e.text, 6000)) throw fail(400, '转写为空或过长。');
   if (e.type === 'tool' && (!tools.has(e.name) || (e.topic != null && !string(e.topic, 50))))
     throw fail(400, '工具参数无效。');
+  const time = (v) => Number.isFinite(v) && v >= 0;
+  if ([e.startMs, e.cutAtMs, e.atMs].some((v) => v != null && !time(v)))
+    throw fail(400, '无效的音频时间点。');
+  if (e.type === 'marker' && (!['speech_started', 'speech_stopped', 'committed'].includes(e.name) || !time(e.atMs)))
+    throw fail(400, '无效的断句记录。');
+  if (e.type === 'recording' && (!Number.isSafeInteger(e.offset) || e.offset < 0 || !time(e.originMs) ||
+      typeof e.final !== 'boolean' || typeof e.pcm !== 'string' || e.pcm.length > 90000))
+    throw fail(400, '无效的双声道录音片段。');
   if (
     e.type === 'playback' &&
     (typeof e.text !== 'string' ||
@@ -54,17 +62,17 @@ async function body(req, limit) {
   }
   return Buffer.concat(parts).toString('utf8');
 }
-function wav(pcm) {
+function wav(pcm, channels = 1) {
   const h = Buffer.alloc(44);
   h.write('RIFF');
   h.writeUInt32LE(pcm.length + 36, 4);
   h.write('WAVEfmt ', 8);
   h.writeUInt32LE(16, 16);
   h.writeUInt16LE(1, 20);
-  h.writeUInt16LE(1, 22);
+  h.writeUInt16LE(channels, 22);
   h.writeUInt32LE(8000, 24);
-  h.writeUInt32LE(16000, 28);
-  h.writeUInt16LE(2, 32);
+  h.writeUInt32LE(16000 * channels, 28);
+  h.writeUInt16LE(2 * channels, 32);
   h.writeUInt16LE(16, 34);
   h.write('data', 36);
   h.writeUInt32LE(pcm.length, 40);
@@ -95,13 +103,19 @@ export function createApp({ store, key, workspace, upstream = fetch }) {
         return reply(200, readFileSync(file), types[file.pathname.split('.').at(-1)]);
       }
       if (path === '/api/status' && method === 'GET') return reply(200, { model: MODEL, ready });
+      if (path === '/api/examples/partial-result' && method === 'GET')
+        return reply(200, partialResultExample());
       if (path === '/api/calls' && method === 'POST') return reply(201, store.create());
-      const match = path.match(/^\/api\/calls\/([a-f0-9-]{36})(?:\/(events|sdp|clips)(?:\/([\w.-]+))?)?$/);
+      const match = path.match(/^\/api\/calls\/([a-f0-9-]{36})(?:\/(events|sdp|clips|evidence|recordings)(?:\/([\w.-]+))?)?$/);
       if (!match) throw fail(404, '找不到该地址。');
       const [, id, route, clipId] = match;
       const token = (req.headers.authorization || '').replace(/^Bearer /, '');
       const s = store.read(id, token);
       if (method === 'GET' && !route) return reply(200, s);
+      if (method === 'GET' && route === 'evidence' && !clipId)
+        return reply(200, store.report(id, token));
+      if (method === 'GET' && route === 'recordings' && clipId)
+        return reply(200, wav(store.recording(id, token, clipId), 2), 'audio/wav');
       if (method === 'GET' && route === 'clips' && clipId)
         return reply(200, wav(store.clip(id, token, clipId)), 'audio/wav');
       if (method === 'POST' && route === 'events') {

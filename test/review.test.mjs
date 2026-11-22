@@ -45,7 +45,82 @@ test('only the current verified merchant can retrieve the synthetic review mater
   assert.equal(tool(q, 'lookup_review_guidance', 'unknown').ok, false);
   say('我不是青禾商贸，你打错了。');
   assert.equal(store.read(call.id, call.token).identity, 'denied');
+  assert.equal(store.read(call.id, call.token).receipt, null);
+  assert.deepEqual(store.read(call.id, call.token).points, []);
   assert.throws(() => send('tool', { turn: q, name: 'get_call_progress' }), /已结束/);
+});
+test('hangup preserves partial notice and issues one simulated opinion per case revision', (t) => {
+  const { call, store, say, send, tool } = setup(t);
+  const first = tool(say('我是青禾商贸'), 'verify_merchant');
+  const clip = { pcm: sound.toString('base64'), drained: true, interrupted: false };
+  const second = send('playback', { ...clip, point: first.point, text: first.say }).result.next;
+  send('playback', { ...clip, point: second.point, text: '第二项', interrupted: true, drained: false });
+  const closed = send('end').snapshot;
+  assert.deepEqual(closed.points.map(({ id, status }) => [id, status]), [['chain', 'complete'], ['seal', 'partial']]);
+  assert.match(closed.receipt.opinion, /品牌方到经销商/);
+  assert.match(closed.receipt.opinion, /盖章页/);
+  assert.ok(Number.isFinite(Date.parse(closed.receipt.issuedAt)));
+  assert.deepEqual(store.read(call.id, call.token).receipt, closed.receipt);
+  assert.deepEqual(send('end').snapshot.receipt, closed.receipt);
+  assert.deepEqual(send('playback', { ...clip, point: second.point, text: second.say }).snapshot.points, closed.points);
+
+  const another = store.create();
+  const connection = store.event(another.id, another.token, { type: 'connect', id: 'c' }).snapshot.connection;
+  const write = (e) => store.event(another.id, another.token, { ...e, id: randomUUID(), connection });
+  write({ type: 'turn', turn: 't' });
+  write({ type: 'transcript', turn: 't', text: '我是青禾商贸' });
+  write({ type: 'tool', turn: 't', name: 'verify_merchant' });
+  const repeated = write({ type: 'end' }).snapshot;
+  assert.deepEqual(repeated.receipt, closed.receipt);
+  assert.ok(repeated.points.every((p) => p.status === 'pending'));
+});
+test('material disputes, unresolved questions and callback requests survive subsequent answers', (t) => {
+  const { store, call, say, send, tool, connect } = setup(t);
+  tool(say('我是青禾商贸'), 'verify_merchant');
+  say('并非所有材料都要盖章吧？');
+  say('是不是你打错了一个字？');
+  const first = say('公证费要多少？');
+  const absent = tool(first, 'lookup_review_guidance', 'unknown');
+  const played = { pcm: sound.toString('base64'), drained: true, interrupted: false };
+  send('playback', { ...played, questionTurn: first, text: absent.say });
+  const second = say('要补哪一页？');
+  const page = tool(second, 'lookup_review_guidance', 'page');
+  send('playback', { ...played, questionTurn: second, text: page.say });
+  connect();
+  assert.equal(store.read(call.id, call.token).pendingQuestion, '公证费要多少？');
+  say('处理好以后电话通知我。');
+  assert.equal(store.read(call.id, call.token).callback.action, 'callback');
+  say('不用回电了。');
+  assert.equal(store.read(call.id, call.token).callback, null);
+  say('不确定，晚点再说。');
+  const saved = send('end').snapshot;
+  assert.equal(saved.identity, 'verified');
+  assert.equal(saved.callback.action, 'clarify');
+  assert.deepEqual(saved.questions.map((q) => q.text), ['公证费要多少？']);
+});
+
+test('timing export shares the recording clock and keeps unverified latencies empty', (t) => {
+  const { store, call, say, send } = setup(t);
+  const turn = say('你好');
+  const pcm = Buffer.alloc(160 * 4 * 4);
+  for (let i = 160; i < 480; i++) pcm.writeInt16LE(4000, i * 4);
+  const chunk = { id: 'stereo-0', originMs: 1000, offset: 0, final: true, pcm: pcm.toString('base64') };
+  send('recording', chunk);
+  send('recording', chunk);
+  assert.throws(() => send('recording', { ...chunk, id: 'out-of-order', offset: 42 }), /不连续/);
+  send('marker', { turn, name: 'speech_started', atMs: 1040 });
+  send('marker', { turn, name: 'speech_stopped', atMs: 1070 });
+  send('playback', { turn, interruptedByTurn: turn, text: '您好', interrupted: true, drained: false,
+    startMs: 1100, cutAtMs: 4100, pcm: sound.toString('base64') });
+  const report = store.report(call.id, call.token);
+  const connection = report.connections[0];
+  assert.deepEqual(store.recording(call.id, call.token, connection.connection), pcm);
+  assert.throws(() => store.report(call.id, 'other'), /找不到/);
+  const row = connection.turns[0];
+  assert.deepEqual([row.micStartCandidateMs, row.micEndCandidateMs], [1020, 1060]);
+  assert.deepEqual([row.replies[0].firstSoundMs, row.replies[0].lastSoundMs], [1100, 4100]);
+  assert.equal(row.interruptedReplies[0].gateClosedMs, 4100);
+  assert.equal(row.firstWordLatencyMs, null);
 });
 test('interrupted playback is partial, stale retries and reconnect cannot advance the wrong item', (t) => {
   const { store, call, send, say, tool, connect } = setup(t);

@@ -257,12 +257,110 @@ dd {
   font-weight: 600;
   font-size: 0.9rem;
 }
+[hidden], .show-result .live-only {
+  display: none !important;
+}
+.result-header, .result-grid {
+  display: grid;
+  align-items: start;
+  gap: 18px;
+}
+.result-header {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  margin: 34px 0 22px;
+}
+#result-title {
+  margin: 4px 0;
+}
+#result-title:focus {
+  outline: none;
+}
+#result-summary, .result-list p, #receipt-status {
+  color: #496056;
+}
+.text-link {
+  color: #176855;
+  text-underline-offset: 4px;
+  font-weight: 600;
+}
+.result-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  margin-bottom: 18px;
+}
+.show-result #transcript-card {
+  grid-column: 1 / -1;
+}
+.outcome-group + .outcome-group {
+  border-top: 1px solid #dce5dc;
+  margin-top: 20px;
+  padding-top: 18px;
+}
+.result-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.result-list li {
+  border-left: 3px solid #49816a;
+  padding: 2px 12px;
+  overflow-wrap: anywhere;
+}
+.result-list li + li {
+  margin-top: 12px;
+}
+#followup-items li {
+  border-color: #bb9657;
+}
+.item-status {
+  font-size: 0.8rem;
+  color: #486952;
+  margin-left: 10px;
+}
+#followup-items .item-status {
+  color: #825723;
+}
+.result-list p, #receipt-opinion, #receipt-status {
+  font-size: 0.92rem;
+  margin-top: 5px;
+}
+.receipt-card {
+  background: #f9fcf8;
+  border-top: 3px solid #408367;
+}
+#receipt-number {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+#receipt-opinion {
+  white-space: pre-line;
+  line-height: 1.8;
+}
+#result-notice {
+  color: #8b4d1c;
+  margin-bottom: 12px;
+}
+.record-option {
+  display: block;
+  text-align: center;
+  margin-top: 12px;
+  font-size: 0.875rem;
+}
+.downloads {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
 @media (max-width: 690px) {
   .frame {
     padding: 0 16px;
   }
-  .grid {
+  .grid, .result-grid, .result-header {
     grid-template-columns: 1fr;
+  }
+  .result-header {
+    justify-items: start;
   }
   .title {
     margin-top: 23px;

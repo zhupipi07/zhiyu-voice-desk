@@ -13,13 +13,50 @@
         <span class="env">本地测试台</span>
       </div>
     </header>
-    <main class="frame">
-      <div class="title">
+    <main id="workspace" class="frame">
+      <section id="result" aria-labelledby="result-title" hidden>
+        <div class="result-header">
+          <div>
+            <p id="case-ref" class="minor"></p>
+            <h1 id="result-title" tabindex="-1">通话办理结果</h1>
+            <p id="result-summary"></p>
+          </div>
+          <button id="result-start" class="secondary" disabled>开始新通话</button>
+          <a id="example-back" class="text-link" href="/" hidden>返回通话台</a>
+        </div>
+        <p id="result-notice" role="status" hidden></p>
+        <div class="result-grid">
+          <section class="card outcome-card" aria-label="材料告知与跟进">
+            <div class="outcome-group">
+              <h2>已讲完</h2>
+              <ul id="completed-items" class="result-list"></ul>
+            </div>
+            <div class="outcome-group">
+              <h2>待跟进</h2>
+              <ul id="followup-items" class="result-list"></ul>
+            </div>
+          </section>
+          <section class="card receipt-card" aria-labelledby="receipt-heading">
+            <h2 id="receipt-heading">京麦模拟回执</h2>
+            <p id="receipt-status"></p>
+            <div id="receipt-details" hidden>
+              <dl>
+                <div><dt>回执编号</dt><dd id="receipt-number"></dd></div>
+                <div id="receipt-date-row"><dt>写入时间</dt><dd id="receipt-date"></dd></div>
+              </dl>
+              <h3>书面整改意见</h3>
+              <p id="receipt-opinion"></p>
+            </div>
+          </section>
+        </div>
+        <div id="evidence-downloads" class="downloads" hidden></div>
+      </section>
+      <div class="title live-only">
         <h1>资审模拟通话</h1>
         <span>POP 商家入驻</span>
       </div>
-      <div class="grid">
-        <section class="card call">
+      <div class="grid" id="desk-grid">
+        <section class="card call live-only">
           <div class="row">
             <h2>语音工作台</h2>
             <time id="clock" aria-label="本次连接用时">00:00</time>
@@ -35,8 +72,9 @@
             ><button id="end" class="secondary" disabled>挂断</button>
           </div>
           <p class="note">麦克风语音发送到百炼。模拟转写与坐席播放片段保存在本机。</p>
+          <label class="record-option"><input type="checkbox" id="record-evidence"> 同时保存双方语音，供本机质检回听</label>
         </section>
-        <aside class="card">
+        <aside class="card live-only">
           <h2>测试者手卡</h2>
           <p>你扮演 <strong>青禾商贸</strong> 的商家。接通后，等 AI 专员先开口。</p>
           <ol>
@@ -45,8 +83,9 @@
             <li>听完答复后，可以追问“还有什么没说完？”</li>
           </ol>
           <p class="note">另开一通说“你打错了”，可以测试错号分支。</p>
+          <a class="text-link" href="/?example=partial">查看中途挂断的办理结果示例</a>
         </aside>
-        <section class="card">
+        <section class="card" id="transcript-card">
           <div class="row">
             <h2>通话记录</h2>
             <span class="minor">逐轮转写</span>
@@ -55,7 +94,7 @@
             <li class="empty">接通后的对话将显示在这里。</li>
           </ol>
         </section>
-        <section class="card">
+        <section class="card live-only">
           <div class="row">
             <h2>办理进度</h2>
             <span class="minor">合成审核单</span>

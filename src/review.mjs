@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { callbackIntent, deniesIdentity } from './contact.mjs';
+import { evidenceReport, voiceFrames } from './evidence.mjs';
 
 export const MODEL = 'qwen-audio-3.1-realtime-flash';
 const caseId = 'POP-DEMO-018',
@@ -8,14 +10,15 @@ const materials = [
   {
     id: 'chain',
     title: '授权链路',
-    script: '第一项，请补交品牌方到经销商的授权书，补齐中间的授权关系。',
+    prefix: '第一项，',
+    requirement: '请补交品牌方到经销商的授权书，补齐中间的授权关系。',
     terms: ['品牌方', '经销商', '授权书'],
   },
   {
     id: 'seal',
     title: '盖章页',
-    script:
-      '第二项，请补交授权书的盖章页。请确认这页能看清双方公司名称、印章和授权有效期，再上传完整页面。',
+    prefix: '第二项，',
+    requirement: '请补交授权书的盖章页。请确认这页能看清双方公司名称、印章和授权有效期，再上传完整页面。',
     terms: ['盖章页', '公司名称', '印章', '有效期', '上传'],
   },
 ];
@@ -59,11 +62,48 @@ export function sessionConfig() {
 export const fail = (status, message) => Object.assign(new Error(message), { status });
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const normalize = (text) => text.normalize('NFKC').replace(/[\s\p{P}]/gu, '');
-const denied = (text) => /打错|找错|不是本人|不是.{0,6}青禾|不属于青禾|并非|不是我们公司/.test(text);
 const matches = (text) =>
   /^(?:您好|你好|对|是的|没错|好的|嗯)*(?:我们是|我是|这里是|这边是|是|我代表|我们公司叫|公司名称是|公司叫)?青禾商贸(?:有限公司|有限责任公司)?(?:的|的负责人|没错|对|是我)?$/.test(
     text
   );
+
+const pointScript = (point) => point.prefix + point.requirement;
+const writtenOpinion = materials.map((point) => point.requirement).join('\n');
+
+function questions(s) {
+  return s.questions ?? (s.pendingQuestion ? [{
+    text: s.pendingQuestion, turn: s.questionTurn, connection: s.questionConnection,
+    hasAnswer: s.questionHasAnswer === true,
+  }] : []);
+}
+
+function snapshot(s) {
+  return {
+    caseId: s.caseId ?? caseId,
+    revision: s.revision ?? revision,
+    status: s.status,
+    identity: s.identity,
+    points: s.identity === 'verified'
+      ? materials.map(({ id, title, requirement }) => ({ id, title, requirement, status: s.points[id] }))
+      : [],
+    turns: s.turns,
+    tools: s.tools,
+    pendingQuestion: questions(s).at(-1)?.text ?? null,
+    questions: questions(s),
+    callback: s.callback ?? null,
+    recordings: s.recordings ?? {},
+    connection: s.connection,
+    receipt: s.receipt ?? null,
+  };
+}
+
+export function partialResultExample() {
+  return snapshot({
+    status: 'ended', identity: 'verified', points: { chain: 'complete', seal: 'partial' },
+    turns: [], tools: [], pendingQuestion: null, connection: null,
+    receipt: { number: 'JM-EXAMPLE-018', issuedAt: null, opinion: writtenOpinion },
+  });
+}
 
 export function openStore(file) {
   const db = new DatabaseSync(file);
@@ -71,27 +111,26 @@ export function openStore(file) {
     CREATE TABLE IF NOT EXISTS review_calls (id TEXT PRIMARY KEY, token TEXT NOT NULL, state TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS review_events (call TEXT, connection TEXT, event TEXT, body TEXT NOT NULL, result TEXT,
       created TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(call, connection, event));
-    CREATE TABLE IF NOT EXISTS review_audio (call TEXT, event TEXT, pcm BLOB NOT NULL, PRIMARY KEY(call,event));`);
+    CREATE TABLE IF NOT EXISTS review_audio (call TEXT, event TEXT, pcm BLOB NOT NULL, PRIMARY KEY(call,event));
+    CREATE TABLE IF NOT EXISTS review_recording_chunks (
+      call TEXT NOT NULL, connection TEXT NOT NULL, offset INTEGER NOT NULL, pcm BLOB NOT NULL,
+      PRIMARY KEY(call, connection, offset));
+    CREATE TABLE IF NOT EXISTS review_receipts (
+      case_id TEXT NOT NULL, revision INTEGER NOT NULL, number TEXT NOT NULL UNIQUE,
+      issued_at TEXT NOT NULL, opinion TEXT NOT NULL, PRIMARY KEY(case_id, revision));`);
   function load(id, token) {
     const row = db.prepare('SELECT state FROM review_calls WHERE id=? AND token=?').get(id, digest(token));
     if (!row) throw fail(404, '找不到该测试通话。');
     return JSON.parse(row.state);
   }
-  function snapshot(s) {
-    return {
-      caseId: s.caseId ?? caseId,
-      revision: s.revision ?? revision,
-      status: s.status,
-      identity: s.identity,
-      points:
-        s.identity === 'verified'
-          ? materials.map((p) => ({ id: p.id, title: p.title, status: s.points[p.id] }))
-          : [],
-      turns: s.turns,
-      tools: s.tools,
-      pendingQuestion: s.pendingQuestion,
-      connection: s.connection,
-    };
+  function writeReceipt(s) {
+    const application = s.caseId ?? caseId, version = s.revision ?? revision;
+    db.prepare(`INSERT INTO review_receipts (case_id, revision, number, issued_at, opinion)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(case_id, revision) DO NOTHING`)
+      .run(application, version, 'JM-SIM-' + application + '-R' + version, new Date().toISOString(), writtenOpinion);
+    const receipt = db.prepare(`SELECT number, issued_at AS issuedAt, opinion FROM review_receipts
+      WHERE case_id=? AND revision=?`).get(application, version);
+    return { ...receipt };
   }
   function create() {
     const id = randomUUID(),
@@ -115,19 +154,21 @@ export function openStore(file) {
     if (s.identity !== 'verified') return { ok: false, say: '请先报出本次测试商家名称，以便核实身份。' };
     const next = materials.find((p) => s.points[p.id] !== 'complete');
     return next
-      ? { ok: true, point: next.id, say: next.script, source: '合成资审单 POP-DEMO-018 / v1' }
+      ? { ok: true, point: next.id, say: pointScript(next), source: '合成资审单 POP-DEMO-018 / v1' }
       : { ok: true, say: '两项整改要求已说明。请问还有什么需要核实的吗？' };
   }
   function apply(s, e, audibleMs) {
     const currentSpeech = () =>
       s.turns.find((t) => t.connection === s.connection && t.item === e.turn && t.speaker === '商家');
-    if (s.status !== 'open' && e.type !== 'playback') throw fail(409, '此通电话已结束，请发起新通话。');
+    if (e.type === 'end' && s.status === 'ended' && s.connection === e.connection) return {};
+    if (s.status !== 'open' && !['playback', 'recording', 'marker'].includes(e.type)) throw fail(409, '此通电话已结束，请发起新通话。');
     if (e.type === 'connect') {
       s.connection = randomUUID();
       s.turn = null;
       return { session: sessionConfig(), next: progress(s) };
     }
     if (s.connection !== e.connection || !s.connection) throw fail(409, '通话连接已更换。');
+    if (e.type === 'marker' || e.type === 'recording') return {};
     if (e.type === 'turn') {
       s.turn = e.turn;
       if (!currentSpeech())
@@ -136,10 +177,16 @@ export function openStore(file) {
       const turn = currentSpeech();
       if (!turn) throw fail(409, '缺少对应的语音轮次。');
       turn.text = e.text;
-      if (s.turn === e.turn && denied(normalize(e.text))) {
+      if (s.turn === e.turn && deniesIdentity(e.text)) {
         s.identity = 'denied';
         s.status = 'wrong_number';
-        s.pendingQuestion = null;
+        s.questions = [];
+        s.callback = null;
+      } else if (s.turn === e.turn) {
+        const action = callbackIntent(e.text, s.identity === 'verified');
+        if (action === 'declined') s.callback = null;
+        if (action === 'callback' || action === 'clarify')
+          s.callback = { action, text: e.text, turn: e.turn, connection: s.connection };
       }
     } else if (e.type === 'tool') {
       let result;
@@ -152,9 +199,9 @@ export function openStore(file) {
         } else result = { ok: false, say: '暂时无法核实，请只说出完整测试商家名称。' };
       } else if (s.identity !== 'verified' || e.name === 'get_call_progress') result = progress(s);
       else if (e.name === 'lookup_review_guidance') {
-        s.pendingQuestion = currentSpeech()?.text || '查询材料';
+        const question = currentSpeech()?.text || '查询材料';
         const answer =
-          e.topic === 'chain' ? materials[0].script : Object.hasOwn(notes, e.topic) ? notes[e.topic] : null;
+          e.topic === 'chain' ? pointScript(materials[0]) : Object.hasOwn(notes, e.topic) ? notes[e.topic] : null;
         result = {
           ok: Boolean(answer),
           say: answer || '这张模拟单没有对应依据，需要进一步核实。',
@@ -162,8 +209,8 @@ export function openStore(file) {
           source: answer ? '合成资审单 POP-DEMO-018 / v1' : null,
           questionTurn: e.turn,
         };
-        s.questionTurn = e.turn;
-        s.questionConnection = s.connection;
+        s.questions = questions(s).filter((q) => q.turn !== e.turn || q.connection !== s.connection);
+        s.questions.push({ turn: e.turn, connection: s.connection, text: question, hasAnswer: result.ok });
       } else throw fail(400, '未知业务工具。');
       s.tools.push({ name: e.name, ok: result.ok, turn: e.turn });
       return result;
@@ -187,22 +234,23 @@ export function openStore(file) {
         const words = normalize(e.text);
         const covered = point.terms.every((term) => words.includes(term));
         // A short blip plus an entire generated transcript cannot demonstrate full playback.
-        const minSpeechMs = Math.max(500, normalize(point.script).length * 40);
+        const minSpeechMs = Math.max(500, normalize(pointScript(point)).length * 40);
         s.points[point.id] =
           !e.interrupted && e.drained && audibleMs >= minSpeechMs && covered ? 'complete' : 'partial';
       }
       if (
+        s.status === 'open' &&
         e.questionTurn &&
-        e.questionTurn === s.questionTurn &&
-        s.connection === s.questionConnection &&
         e.drained &&
         !e.interrupted &&
         audibleMs >= 300 &&
         e.text
       )
-        s.pendingQuestion = null;
+        s.questions = questions(s).filter((q) =>
+          !(q.hasAnswer && q.turn === e.questionTurn && q.connection === s.connection));
       return { next: progress(s) };
     } else if (e.type === 'end') {
+      if (s.identity === 'verified') s.receipt = writeReceipt(s);
       s.status = 'ended';
     } else throw fail(400, '未知通话事件。');
     return {};
@@ -215,7 +263,7 @@ export function openStore(file) {
       const old = db
         .prepare('SELECT body,result FROM review_events WHERE call=? AND connection=? AND event=?')
         .get(id, connection, e.id);
-      const pcm = e.type === 'playback' ? Buffer.from(e.pcm || '', 'base64') : null;
+      const pcm = ['playback', 'recording'].includes(e.type) ? Buffer.from(e.pcm || '', 'base64') : null;
       if (pcm && pcm.length % 2) throw fail(400, '无效的音频记录。');
       const body = JSON.stringify(pcm ? { ...e, pcm: digest(pcm) } : e);
       let result;
@@ -225,16 +273,27 @@ export function openStore(file) {
         result = JSON.parse(old.result);
       } else {
         let audibleMs = 0;
-        if (pcm) {
-          // 本地播放回录为单声道 8 kHz PCM16，以 20 毫秒为窗口检查有效音量。
-          for (let i = 0; i + 320 <= pcm.length; i += 320) {
-            let energy = 0;
-            for (let j = i; j < i + 320; j += 2) energy += pcm.readInt16LE(j) ** 2;
-            if (energy / 160 > 100 ** 2) audibleMs += 20;
+        let firstSoundMs = null, lastSoundMs = null;
+        if (e.type === 'recording') {
+          s.recordings ??= {};
+          const rec = s.recordings[connection] ?? { originMs: e.originMs, samples: 0, finished: false };
+          if (rec.finished || rec.samples !== e.offset || rec.originMs !== e.originMs || pcm.length % 4 ||
+              (!pcm.length && !e.final)) throw fail(409, '录音片段不连续。');
+          db.prepare('INSERT INTO review_recording_chunks VALUES(?,?,?,?)').run(id, connection, e.offset, pcm);
+          rec.samples += pcm.length / 4;
+          rec.finished = e.final;
+          s.recordings[connection] = rec;
+        } else if (pcm) {
+          const frames = voiceFrames(pcm, 1, 0, e.startMs ?? 0);
+          audibleMs = frames.length * 20;
+          if (frames.length && e.startMs != null) {
+            firstSoundMs = frames[0];
+            lastSoundMs = frames.at(-1) + 20;
           }
           db.prepare('INSERT INTO review_audio VALUES(?,?,?)').run(id, clipKey(e), pcm);
         }
         result = apply(s, e, audibleMs);
+        if (e.type === 'playback') Object.assign(result, { firstSoundMs, lastSoundMs });
         db.prepare('UPDATE review_calls SET state=? WHERE id=?').run(JSON.stringify(s), id);
         db.prepare('INSERT INTO review_events(call,connection,event,body,result) VALUES(?,?,?,?,?)').run(
           id,
@@ -251,10 +310,28 @@ export function openStore(file) {
       throw err;
     }
   }
+  function stereo(id, connection) {
+    const rows = db.prepare('SELECT pcm FROM review_recording_chunks WHERE call=? AND connection=? ORDER BY offset').all(id, connection);
+    if (!rows.length) throw fail(404, '本次连接没有质检录音。');
+    return Buffer.concat(rows.map((row) => row.pcm));
+  }
   return {
     create,
     event,
     read: (id, token) => snapshot(load(id, token)),
+    recording(id, token, connection) {
+      load(id, token);
+      return stereo(id, connection);
+    },
+    report(id, token) {
+      const s = snapshot(load(id, token));
+      const events = db.prepare('SELECT body,result FROM review_events WHERE call=? ORDER BY rowid').all(id).map((row) => {
+        const e = JSON.parse(row.body), result = JSON.parse(row.result);
+        if (e.type === 'playback') return { ...e, clip: clipKey(e), firstSoundMs: result.firstSoundMs, lastSoundMs: result.lastSoundMs };
+        return { ...e, result };
+      });
+      return evidenceReport(id, s, events, (conn) => stereo(id, conn));
+    },
     clip(id, token, eventId) {
       load(id, token);
       const row = db.prepare('SELECT pcm FROM review_audio WHERE call=? AND event=?').get(id, eventId);

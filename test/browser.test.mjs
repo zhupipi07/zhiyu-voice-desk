@@ -146,6 +146,7 @@ test(
       chrome,
       [
         '--headless=new',
+        '--mute-audio',
         '--disable-gpu',
         '--disable-extensions',
         '--no-first-run',
@@ -275,9 +276,52 @@ test(
     );
     await click('end');
     await text('status', '通话已结束');
+    await text('result-summary', '2 项材料已讲完，0 项材料待跟进');
     assert.equal(await run('document.querySelectorAll("#transcript .replay").length>0'), true);
     await run('document.querySelector("#transcript .replay").click()');
-    await click('start');
+    await run('document.querySelector("#record-evidence").checked = true');
+    await click('result-start');
+    await until(() => run('window.fixture.speaking.includes("只作开场核身")'), 'new call for mid-item hangup');
+    await ask('我是青禾商贸', 'verify_merchant');
+    await until(() => run('window.fixture.speaking.includes("第二项")'), 'hang up during second item');
+    await delay(900);
+    await click('end');
+    await text('result-summary', '1 项材料已讲完，1 项材料待跟进');
+    await text('completed-items', '授权链路');
+    await text('followup-items', '盖章页已播部分');
+    const receipt = await ui('receipt-number');
+    assert.ok(receipt);
+    await text('evidence-downloads', '双声道录音');
+    const recorded = await run(`(async () => {
+      const { id, token } = JSON.parse(sessionStorage.getItem('review-ticket'));
+      const root = '/api/calls/' + id;
+      const headers = { Authorization: 'Bearer ' + token };
+      const report = await (await fetch(root + '/evidence', {headers})).json();
+      const c = report.connections[0];
+      const wav = new DataView(await (await fetch(root + '/recordings/' + c.connection, {headers})).arrayBuffer());
+      let micAudible = false, agentAudible = false;
+      for (let offset = 44; offset < wav.byteLength; offset += 4) {
+        micAudible ||= Math.abs(wav.getInt16(offset, true)) > 100;
+        agentAudible ||= Math.abs(wav.getInt16(offset + 2, true)) > 100;
+        if (micAudible && agentAudible) break;
+      }
+      return { channels: wav.getUint16(22, true), samples: c.recording.samples, finished: c.recording.finished,
+        bytes: wav.byteLength, micAudible, agentAudible, receipt: report.receipt.number, tools: c.turns.flatMap(t => t.tools.map(x => x.name)),
+        hasSound: c.turns.some(t => t.replies.some(r => r.firstSoundMs != null && r.gateClosedMs != null)) };
+    })()`);
+    assert.equal(recorded.channels, 2);
+    assert.ok(recorded.samples > 8000);
+    assert.equal(recorded.finished, true);
+    assert.equal(recorded.bytes, 44 + recorded.samples * 4);
+    assert.equal(recorded.receipt, receipt);
+    assert.equal(recorded.hasSound, true);
+    assert.ok(recorded.micAudible && recorded.agentAudible);
+    assert.ok(recorded.tools.includes('verify_merchant'));
+    await cdp('Page.reload');
+    await text('receipt-number', receipt);
+    await text('followup-items', '从本项开头补讲');
+    await run('(' + installTestPeer.toString() + ')()');
+    await click('result-start');
     await until(
       () =>
         run('window.fixture.speaking.includes("只作开场核身") && window.fixture.diagnostics()[1]==="open"'),
@@ -285,6 +329,8 @@ test(
     );
     await ask('你打错了');
     await text('status', '错号已结束');
+    await text('receipt-status', '未生成书面回执');
+    await text('followup-items', '复核联系方式');
     assert.doesNotMatch(await ui('progress'), /盖章页/);
   }
 );

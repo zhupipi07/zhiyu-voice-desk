@@ -1,5 +1,7 @@
 import { VoiceCall } from './realtime.mjs';
+import { renderResult } from './result.mjs';
 const $ = (id) => document.getElementById(id);
+const example = new URLSearchParams(location.search).get('example') === 'partial';
 let apiReady = false,
   ticket,
   state,
@@ -23,6 +25,8 @@ const toolNames = {
 };
 const setNotice = (message) => {
   $('notice').textContent = message;
+  $('result-notice').textContent = message;
+  $('result-notice').hidden = !message;
 };
 function uiStatus(message) {
   $('status').textContent = message;
@@ -36,6 +40,8 @@ setInterval(() => {
 }, 500);
 function buttons() {
   $('start').disabled = !apiReady || busy || Boolean(voice);
+  $('result-start').disabled = $('start').disabled;
+  $('record-evidence').disabled = busy || Boolean(voice);
   $('start').textContent = state?.status === 'open' ? '继续上次通话' : '开始模拟通话';
   $('end').disabled = busy || (!voice && state?.status !== 'open');
   $('wave').classList.toggle('live', online);
@@ -54,8 +60,34 @@ async function request(path, options = {}) {
 function route(suffix = '') {
   return '/api/calls/' + ticket.id + suffix;
 }
+function downloadButton(label, suffix, filename) {
+  const b = document.createElement('button');
+  b.className = 'secondary';
+  b.textContent = label;
+  b.onclick = async () => {
+    try {
+      const blob = await (await request(route(suffix))).blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    } catch (err) { setNotice(err.message); }
+  };
+  return b;
+}
 function render(s) {
   state = s;
+  renderResult(s, example);
+  const downloads = $('evidence-downloads');
+  downloads.hidden = !ticket || !s || s.status === 'open' || example;
+  if (!downloads.hidden) {
+    downloads.replaceChildren(downloadButton('下载逐轮质检记录', '/evidence', ticket.id + '.json'));
+    for (const [index, [conn, rec]] of Object.entries(s.recordings || {}).entries()) {
+      if (rec.samples) downloads.append(downloadButton('连接 ' + (index + 1) + ' 双声道录音' + (rec.finished ? '' : '（片段）'),
+        '/recordings/' + conn, ticket.id + '-' + conn + '.wav'));
+    }
+  }
   const log = $('transcript');
   log.replaceChildren();
   for (const t of s?.turns || []) {
@@ -162,7 +194,6 @@ async function stop(endCall, message = '') {
     if (!message) message = err.message;
   } finally {
     busy = false;
-    if (state?.status !== 'open') sessionStorage.removeItem('review-ticket');
     uiStatus(
       state?.status === 'wrong_number'
         ? '错号已结束'
@@ -194,6 +225,7 @@ $('start').onclick = async () => {
     connection = snapshot.connection;
     const transport = new VoiceCall({
       config: result.session,
+      recordEvidence: $('record-evidence').checked,
       restored: result.next,
       event,
       current: () => state,
@@ -229,8 +261,13 @@ $('start').onclick = async () => {
   }
 };
 $('end').onclick = () => stop(true);
+$('result-start').onclick = () => $('start').click();
 async function init() {
   try {
+    if (example) {
+      render(await (await request('/api/examples/partial-result')).json());
+      return;
+    }
     const health = await (await request('/api/status')).json();
     apiReady = health.ready;
     const saved = sessionStorage.getItem('review-ticket');

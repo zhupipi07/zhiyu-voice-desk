@@ -1,0 +1,16 @@
+[
+  {"set":"dev","verified":true,"words":"出了结果请打给我。","expect":"callback","basis":"商家明确要求来电告知结果"},
+  {"set":"dev","verified":true,"words":"审核结果在后台能看到吗？","expect":"none","basis":"只询问查询渠道"},
+  {"set":"dev","verified":true,"words":"我说不准，晚点再说。","expect":"clarify","basis":"联系意愿尚未确定"},
+  {"set":"dev","verified":true,"words":"别再给我打电话。","expect":"declined","basis":"商家明确撤销电话联系"},
+  {"set":"dev","verified":false,"words":"请给我回电。","expect":"none","basis":"身份尚未核实"},
+  {"set":"dev","verified":true,"words":"授权书不是我们公司盖的章，可以吗？","expect":"none","basis":"材料问题，与回电无关"},
+  {"set":"holdout","verified":true,"words":"处理好以后电话通知我。","expect":"callback","basis":"指定电话通知处理结果"},
+  {"set":"holdout","verified":true,"words":"劳驾您回拨一下。","expect":"callback","basis":"提出回拨请求"},
+  {"set":"holdout","verified":true,"words":"京麦上能查进展吧？","expect":"none","basis":"询问平台操作"},
+  {"set":"holdout","verified":true,"words":"我还没想好，过会儿决定。","expect":"clarify","basis":"仍在犹豫"},
+  {"set":"holdout","verified":true,"words":"不需要回拨了，留言就好。","expect":"declined","basis":"明确取消回拨"},
+  {"set":"holdout","verified":false,"words":"等审核完给我打个电话。","expect":"none","basis":"接听人未通过核身"},
+  {"set":"dev","verified":true,"words":"我不确定这张授权书需要几页。","expect":"none","basis":"不确定的是材料要求"},
+  {"set":"holdout","verified":true,"words":"你的意思是不用回电了吗？","expect":"clarify","basis":"商家在求证，尚未撤销回电意愿"}
+]

@@ -10,15 +10,35 @@ export class Playback {
       const s = this.segments.get(data.ended || data.id);
       if (!s) return;
       if (data.ended) {
+        s.cutAtMs = data.atMs;
         s.resolve?.();
         return;
       }
+      s.startMs ??= data.atMs;
       if (s.size < 8000 * 60) {
         s.chunks.push(data.samples);
         s.size += data.samples.length;
       } else s.truncated = true;
       if (data.samples.some((v) => Math.abs(v) > 300)) s.lastSound = performance.now();
     };
+  }
+  record(stream, save, onError) {
+    this.recorder = new AudioWorkletNode(this.context, 'review-recorder', { numberOfInputs: 2, outputChannelCount: [1] });
+    this.mic = this.context.createMediaStreamSource(stream);
+    this.mic.connect(this.recorder, 0, 0);
+    this.tap.connect(this.recorder, 0, 1);
+    this.recorder.connect(this.context.destination);
+    this.recordingDone = new Promise((resolve) => {
+      this.recorder.port.onmessage = ({ data }) => {
+        const bytes = new Uint8Array(data.samples.buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 8192)
+          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        save({ type: 'recording', id: 'stereo-' + data.offset, offset: data.offset,
+          originMs: data.originMs, final: data.final, pcm: btoa(binary) })
+          .catch(onError).finally(() => { if (data.final) resolve(); });
+      };
+    });
   }
   attach(track) {
     this.source?.disconnect();
@@ -68,9 +88,21 @@ export class Playback {
     this.segments.delete(id);
     let encoded = '';
     for (const chunk of s.chunks) encoded += String.fromCharCode(...new Uint8Array(chunk.buffer));
-    return { pcm: btoa(encoded), truncated: s.truncated };
+    return { pcm: btoa(encoded), truncated: s.truncated || s.cutAtMs == null, startMs: s.startMs, cutAtMs: s.cutAtMs };
   }
   async close() {
+    if (this.recorder) {
+      this.recorder.port.postMessage('finish');
+      try {
+        // A suspended audio context may never acknowledge the last worklet message.
+        await Promise.race([this.recordingDone, new Promise((resolve) => { this.recordTimeout = setTimeout(resolve, 3000); })]);
+      } finally {
+        clearTimeout(this.recordTimeout);
+        this.recorder.port.onmessage = null;
+        this.mic.disconnect();
+        this.recorder.disconnect();
+      }
+    }
     this.source?.disconnect();
     this.tap?.disconnect();
     if (this.sink) {

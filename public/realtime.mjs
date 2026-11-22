@@ -8,8 +8,8 @@ const systemMessage = (text) => ({
 
 // One instance owns one peer connection. All durable writes go through the call's event queue.
 export class VoiceCall {
-  constructor({ config, restored, event, exchange, status, failure, current }) {
-    Object.assign(this, { config, restored, event, exchange, status, failure, current });
+  constructor({ config, restored, event, exchange, status, failure, current, recordEvidence }) {
+    Object.assign(this, { config, restored, event, exchange, status, failure, current, recordEvidence });
     this.playback = new Playback();
     this.epoch = 0;
     this.responses = new Map();
@@ -115,7 +115,10 @@ export class VoiceCall {
     this.nextPlan = null;
     this.turns.set(id, { written: false });
     // Cut the local audio gate immediately, before waiting for network or storage.
-    if (this.active) void this.finish(this.active, true, false).catch((err) => this.problem(err));
+    if (this.active) {
+      this.active.interruptedByTurn = id;
+      void this.finish(this.active, true, false).catch((err) => this.problem(err));
+    }
     void this.event({ type: 'turn', id: 'turn-' + id, turn: id }).catch((err) => this.problem(err));
   }
   async handle(e, channel) {
@@ -131,6 +134,7 @@ export class VoiceCall {
         this.ready = true;
         await this.sender.replaceTrack(this.stream.getAudioTracks()[0]);
         if (this.closed) return;
+        if (this.recordEvidence) this.playback.record(this.stream, this.event, (err) => this.problem(err));
         clearTimeout(this.timer);
         this.status('通话中');
         if (this.current().identity === 'verified' && this.current().pendingQuestion) {
@@ -154,10 +158,12 @@ export class VoiceCall {
       case 'input_audio_buffer.speech_started':
         this.beginTurn(e.item_id);
         this.status('商家正在说话');
-        return;
+        break;
+      case 'input_audio_buffer.speech_stopped':
+        break;
       case 'input_audio_buffer.committed':
         this.beginTurn(e.item_id);
-        return;
+        break;
       case 'conversation.item.input_audio_transcription.completed': {
         this.beginTurn(e.item_id);
         if (!e.transcript?.trim()) return;
@@ -228,7 +234,11 @@ export class VoiceCall {
       }
       case 'error':
         throw new Error('Flash 返回错误：' + (e.error?.code || e.error?.message || '未知错误'));
+      default:
+        return;
     }
+    if (e.item_id) await this.event({ type: 'marker', id: e.type + '-' + e.item_id,
+      turn: e.item_id, name: e.type.split('.').pop(), atMs: this.playback.context.currentTime * 1000 });
   }
   async runTools(r) {
     const live = () => !this.closed && r.epoch === this.epoch;
@@ -252,6 +262,7 @@ export class VoiceCall {
             turn: r.turn,
             name: t.name,
             topic: args?.topic ?? null,
+            atMs: this.playback.context.currentTime * 1000,
           });
           out = data.result;
         }
@@ -281,10 +292,14 @@ export class VoiceCall {
     if (this.active === r) this.active = null;
     if (interrupted && r.plan.point) this.resumeNeeded = true;
     const clip = await this.playback.cut(r.id);
-    if (!r.text && !r.plan.point && !r.plan.questionTurn) return;
+    if (!r.text && !r.plan.point && !r.plan.questionTurn && !clip.pcm) return;
     const data = await this.event({
       type: 'playback',
       id: 'play-' + r.id,
+      turn: r.turn ?? null,
+      interruptedByTurn: r.interruptedByTurn ?? null,
+      startMs: clip.startMs,
+      cutAtMs: clip.cutAtMs,
       text: r.text,
       point: r.plan.point || r.plan.relatedPoint || null,
       questionTurn: r.plan.questionTurn || null,

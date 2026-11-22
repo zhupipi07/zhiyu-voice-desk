@@ -5,6 +5,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "eval:callback": "node scripts/evaluate-callback.mjs"
   }
 }
