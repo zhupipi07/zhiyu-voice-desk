@@ -1,0 +1,43 @@
+✔ an answered question between materials resumes the next item while other follow-ups stay pending (1.1781ms)
+✔ browser completes a simulated Flash call across an interruption and plays the recorded evidence (51999.3722ms)
+✔ gateway forwards real PCM formats, clears interrupted output and stops both legs on abort (110.5876ms)
+✔ disposition distinguishes submissions from attempts and gives call exceptions priority (0.7094ms)
+✔ an unreviewed FAQ row retains its citation and never supplies a spoken answer (2.0054ms)
+✔ latency uses same-recording annotations and reports unpaired and overlapping turns separately (1.5576ms)
+✔ only the current verified merchant can retrieve the synthetic review materials (7.3129ms)
+✔ a homophonic merchant name needs independent spelling before materials are disclosed (4.7219ms)
+✔ hangup preserves partial notice and issues one simulated opinion per case revision (7.7222ms)
+✔ material disputes, unresolved questions and callback requests survive subsequent answers (3.9738ms)
+✔ guidance replay / 要补哪一页？ (1.5889ms)
+✔ guidance replay / 具体是第几页呢？ (1.1574ms)
+✔ guidance replay / 授权书要补哪一页？ (1.1004ms)
+✔ guidance replay / 上传到哪里？ (1.7072ms)
+✔ guidance replay / 盖章页从哪里上传？ (1.2777ms)
+✔ guidance replay / 我想问，在哪个入口提交？ (0.9789ms)
+✔ guidance replay / 授权关系缺的是哪一段？ (0.8089ms)
+✔ guidance replay / 需要谁给谁的授权书？ (0.909ms)
+✔ guidance replay / 材料补齐了就一定能过吗？ (1.4209ms)
+✔ guidance replay / 补了就一定通过吗？ (0.8457ms)
+✔ guidance replay / 公证费要多少？ (1.0917ms)
+✔ guidance replay / 呃，具。 (0.8087ms)
+✔ guidance replay / 要补哪页，传到哪里？ (2.0568ms)
+✔ guidance replay / 发票要补哪一页？ (0.9486ms)
+✔ guidance replay / 不是问页码，我想问传到哪里？ (0.7066ms)
+✔ guidance replay / 不用告诉我传到哪里。 (0.662ms)
+✔ a lookup only clears its follow-up after an evidenced answer plays (2.9728ms)
+✔ the evidence distinguishes the model proposal from the answer used, including across reconnects (2.7484ms)
+✔ timing export shares the recording clock and keeps unverified latencies empty (2.726ms)
+✔ interrupted playback is partial, stale retries and reconnect cannot advance the wrong item (3.3833ms)
+✔ SQLite retains review progress and output evidence across process restarts (25.8805ms)
+✔ confirmed completion needs an audible prompt and a later merchant confirmation (6.7557ms)
+✔ a call preserves its VAD and callback policy, including a configured rollback (1.4254ms)
+✔ QA retains audio locators and separates interrupted and inaudible risks from complete clips (1.6258ms)
+✔ SDP forwarding uses the configured Flash model and never returns the server credential (118.0745ms)
+ℹ tests 35
+ℹ suites 0
+ℹ pass 35
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 53451.881

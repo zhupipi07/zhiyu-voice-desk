@@ -1,3 +1,5 @@
+import { qualityReport } from './quality.mjs';
+
 // Find audible 20 ms windows on one PCM16 channel. Offsets refer to the connection's AudioContext.
 export function voiceFrames(pcm, channels, channel, originMs) {
   const frames = [];
@@ -16,7 +18,7 @@ export function evidenceReport(call, s, events, readAudio) {
   const recordings = s.recordings ?? {};
   function entry(id) {
     if (!connections.has(id)) connections.set(id, { connection: id, recording: recordings[id] ?? null,
-      turns: [], opening: [] });
+      turns: [], opening: [], setup: [] });
     return connections.get(id);
   }
   function turn(conn, id) {
@@ -30,8 +32,17 @@ export function evidenceReport(call, s, events, readAudio) {
     return row;
   }
   for (const e of events) {
+    if (e.type === 'connect' && e.result?.connection) {
+      entry(e.result.connection).turnDetection = e.result.session.turn_detection;
+      entry(e.result.connection).transport = e.transport ?? null;
+    }
     if (!e.connection) continue;
     const conn = entry(e.connection);
+    if (e.type === 'usage') {
+      conn.usage ??= [];
+      conn.usage.push({ response: e.response, inputTokens: e.inputTokens, outputTokens: e.outputTokens });
+    }
+    if (e.type === 'setup') conn.setup.push({ name: e.name, atMs: e.atMs, attempt: e.attempt });
     if (e.type === 'turn') turn(conn, e.turn);
     if (e.type === 'marker') turn(conn, e.turn).markersMs[e.name] = e.atMs;
     if (e.type === 'transcript') turn(conn, e.turn).transcript = e.text;
@@ -41,7 +52,8 @@ export function evidenceReport(call, s, events, readAudio) {
     });
     if (e.type === 'playback') {
       const reply = { id: e.id, clip: e.clip, text: e.text, firstSoundMs: e.firstSoundMs ?? null,
-        lastSoundMs: e.lastSoundMs ?? null, gateClosedMs: e.cutAtMs ?? null, interrupted: e.interrupted };
+        lastSoundMs: e.lastSoundMs ?? null, gateClosedMs: e.cutAtMs ?? null, interrupted: e.interrupted,
+        drained: e.drained, audibleMs: e.audibleMs };
       (e.turn ? turn(conn, e.turn).replies : conn.opening).push(reply);
       if (e.interruptedByTurn) turn(conn, e.interruptedByTurn).interruptedReplies.push({
         reply: e.id, gateClosedMs: reply.gateClosedMs,
@@ -71,5 +83,5 @@ export function evidenceReport(call, s, events, readAudio) {
   return { call, caseId: s.caseId, revision: s.revision, receipt: s.receipt ?? null,
     clock: '毫秒。每次连接独立计时，WAV 文件位置 = (时间点 − recording.originMs) / 1000 秒。',
     annotation: '左右声道分别为商家、坐席。音量候选点与断句事件供定位。回听标注首个可辨认字后，计算它与商家停语的时间差。',
-    connections: [...connections.values()] };
+    quality: qualityReport(s, events, [...connections.values()]), connections: [...connections.values()] };
 }

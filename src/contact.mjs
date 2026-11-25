@@ -9,9 +9,26 @@ export function deniesIdentity(words) {
 }
 
 // This decision only creates or changes a local follow-up for a verified merchant.
-export function callbackIntent(words, verified) {
+export const callbackVersion = 'callback-v2';
+export const callbackPolicies = {
+  'callback-v1': { attitude: false, wording: false },
+  'callback-attitude': { attitude: true, wording: false },
+  'callback-wording': { attitude: false, wording: true },
+  'callback-v2': { attitude: true, wording: true },
+};
+export function callbackIntent(words, verified, version = callbackVersion) {
   if (!verified) return 'none';
-  const text = words.normalize('NFKC').replace(/\s+/g, '');
+  const policy = callbackPolicies[version];
+  if (!policy) throw new Error('未知回电策略版本');
+  let text = words.normalize('NFKC').replace(/\s+/g, '');
+  if (policy.wording) text = text.replace(/(?:烦请|烦劳|有劳)/gu, '请')
+    .replace(/(?:致电给我|致电我|致电|来电告知|打(?:一)?个电话)/gu, '打电话')
+    .replace(/回(?:一)?个电话/gu, '回电');
+  if (policy.attitude && /回电|回拨|电话|致电|打给我/.test(text)) {
+    if (/(?:没(?:有)?说|并非说|不是说|是否|是不是|是指).{0,12}(?:希望|请|需要|回电|打电话)|(?:希望|需要|请).{0,10}(?:回电|打电话|打给我).{0,3}(?:吗|么)/.test(text)) return 'clarify';
+    if (/(?:不希望|不想|不愿意)(?:你们?|您)?(?:再)?(?:给我)?(?:回电|回拨|打电话|打给我)/.test(text)) return 'declined';
+  }
+  if (policy.wording && /^给我(?:回电|打电话)(?:吧|就好)?[。！!]?$/u.test(text)) return 'callback';
   if (/(?:是说|意思是|是不是).{0,8}(?:不用|不要|不需要).{0,8}(?:回电|打电话|联系)|(?:不用|不要|不需要).{0,8}(?:回电|打电话|联系).{0,3}(?:吗|么|是吗)/.test(text)) return 'clarify';
   if (/(?:不用|不要|不必|别|不需要)(?:再)?(?:给我)?(?:回电|回拨|打电话|打给我|联系我)/.test(text)) return 'declined';
   if (/(?:晚点再说|回头再说|过会儿决定)|(?:说不准|还没想好|不确定).{0,10}(?:回电|打电话|要不要联系)/.test(text)) return 'clarify';

@@ -1,5 +1,18 @@
 # 智语外呼 · 浏览器资审通话
 
+[11 月 25 日参赛自测报告](SELFTEST.md)含排名门槛、真实录音复盘、留出集结果与交付缺口。
+
+Windows 安装 Node.js 24 并配置凭据后，可双击 `start.cmd` 启动本地媒体网关。脚本首次启动时用 npm 安装已锁定的依赖。浏览器用 WebRTC 向本机传输双向语音，本机用官方 WebSocket 接口连接同一个北京业务空间与 Flash 模型。其他系统可执行 `npm ci` 和 `npm start -- --gateway`。单独执行 `npm start` 默认直连百炼，无需安装原生依赖。`.env` 中显式设置 `REVIEW_TRANSPORT=direct` 或 `gateway` 会覆盖启动方式。
+
+### 赛方知识、分流与评审材料
+
+在仓库根目录执行 `python scripts/import-knowledge.py "赛方资料包.zip"` 后重启。导入器读取定稿的「场景汇总」及「高频QA」，将行号与原工作簿 SHA-256 存入本地 `data/knowledge.json`。新建合成申请按三级分类查询关单方式。缺少资料包的队员仍可运行原合成案例。核身后的问答会引用已审定可直接告知的条目，涉及内部操作口径、适用条件或原表矛盾时留下待核实事项。
+
+- `npm run route -- --row 52 --submissions 2 --missed 1` 查询指定场景与次数的下一动作。省略参数可列出全表的默认路线。`--callback`、`--escalation`、`--exposure` 分别表示案卷已有主动回电、越级投诉、外部曝光依据。
+- `npm run eval:quality -- --out data/review-export-01 --audio` 以只读方式扫描历史库，输出可离线打开的 `index.html`、逐通 JSON 和已有双方录音。每次导出使用新目录。页面可按轮次跳到 WAV 的播放位置。省略 `--out` 可只看汇总。模拟回执、实际播出、商家确认分别取证。
+- `npm run eval:rsi` 生成回电表达与核身条件组合，用开发集比较四个策略，选定后运行留出回归。输出逐例错误与版本号。需要回滚时将 `.env` 的 `CALLBACK_POLICY` 改为 `callback-v1` 并重启。新通话绑定该版本，已建立的通话继续使用创建时的版本。
+- 做断句对照时，可分别以 `REVIEW_TURN_MODE=smart_turn_v2`（默认）和 `REVIEW_TURN_MODE=server_vad` 启动新通话。后者使用 450 毫秒静音断句，适合与语义断句对照停顿误切和响应速度。逐通 JSON 保存本次配置与连接事件。
+
 测试者在本机浏览器扮演商家。百炼 `qwen-audio-3.1-realtime-flash` 作为 AI 资审专员主动开场，向 Node.js 查询合成申请单的材料要求，处理插话并继续告知。程序通过 WebRTC 收发语音，运行需要麦克风、可访问百炼的网络，以及北京地域的 API Key 和对应的 Workspace ID。
 
 ## 在本机接通第一通电话

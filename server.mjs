@@ -3,6 +3,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { openStore, MODEL, fail, partialResultExample } from './src/review.mjs';
+import { loadKnowledge } from './src/knowledge.mjs';
+import { gatewayAnswer } from './src/media-gateway.mjs';
 
 const files = new Map(
   ['index.html', 'app.mjs', 'result.mjs', 'realtime.mjs', 'audio.mjs', 'capture.mjs', 'style.css'].map((name) => [
@@ -23,7 +25,7 @@ function validate(e) {
   if (
     !e ||
     !string(e.id, 220) ||
-    !['connect', 'turn', 'transcript', 'tool', 'playback', 'end', 'recording', 'marker'].includes(e.type)
+    !['connect', 'turn', 'transcript', 'tool', 'playback', 'end', 'recording', 'marker', 'setup', 'usage'].includes(e.type)
   )
     throw fail(400, '无效事件。');
   if (e.type !== 'connect' && !string(e.connection, 80)) throw fail(400, '缺少连接编号。');
@@ -33,6 +35,12 @@ function validate(e) {
   if (e.type === 'tool' && (!tools.has(e.name) || (e.topic != null && !string(e.topic, 50))))
     throw fail(400, '工具参数无效。');
   const time = (v) => Number.isFinite(v) && v >= 0;
+  if (e.type === 'usage' && (!string(e.response, 180) ||
+      ![e.inputTokens, e.outputTokens].every((n) => Number.isSafeInteger(n) && n >= 0)))
+    throw fail(400, '无效的模型用量记录。');
+  if (e.type === 'setup' && (!['connected', 'client_channel_open', 'server_channel_open', 'session_created',
+    'session_updated', 'retry', 'failed'].includes(e.name) || ![1, 2].includes(e.attempt) || !time(e.atMs)))
+    throw fail(400, '无效的建连记录。');
   if ([e.startMs, e.cutAtMs, e.atMs].some((v) => v != null && !time(v)))
     throw fail(400, '无效的音频时间点。');
   if (e.type === 'marker' && (!['speech_started', 'speech_stopped', 'committed'].includes(e.name) || !time(e.atMs)))
@@ -62,7 +70,7 @@ async function body(req, limit) {
   }
   return Buffer.concat(parts).toString('utf8');
 }
-function wav(pcm, channels = 1) {
+export function wav(pcm, channels = 1) {
   const h = Buffer.alloc(44);
   h.write('RIFF');
   h.writeUInt32LE(pcm.length + 36, 4);
@@ -78,9 +86,11 @@ function wav(pcm, channels = 1) {
   h.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([h, pcm]);
 }
-export function createApp({ store, key, workspace, upstream = fetch }) {
+export function createApp({ store, key, workspace, upstream = fetch, transport = 'direct' }) {
+  if (!['direct', 'gateway'].includes(transport)) throw new Error('未知语音接入方式。');
+  const gateways = new Map();
   const ready = Boolean(key && workspace && /^[a-z0-9][a-z0-9-]*$/i.test(workspace));
-  return http.createServer(async (req, res) => {
+  const app = http.createServer(async (req, res) => {
     const reply = (status, value, type = 'application/json; charset=utf-8') => {
       res.writeHead(status, {
         'Content-Type': type,
@@ -102,7 +112,7 @@ export function createApp({ store, key, workspace, upstream = fetch }) {
         const file = files.get(path === '/' ? '/index.html' : path);
         return reply(200, readFileSync(file), types[file.pathname.split('.').at(-1)]);
       }
-      if (path === '/api/status' && method === 'GET') return reply(200, { model: MODEL, ready });
+      if (path === '/api/status' && method === 'GET') return reply(200, { model: MODEL, ready, transport });
       if (path === '/api/examples/partial-result' && method === 'GET')
         return reply(200, partialResultExample());
       if (path === '/api/calls' && method === 'POST') return reply(201, store.create());
@@ -127,7 +137,11 @@ export function createApp({ store, key, workspace, upstream = fetch }) {
           throw fail(400, 'JSON 格式不正确。');
         }
         validate(e);
-        return reply(200, store.event(id, token, e));
+        if (e.type === 'connect') e.transport = transport;
+        const data = store.event(id, token, e);
+        if (data.snapshot.status !== 'open' || (e.type === 'connect' && s.connection !== data.snapshot.connection))
+          gateways.get(id)?.abort();
+        return reply(200, data);
       }
       if (method === 'POST' && route === 'sdp') {
         if (!ready) throw fail(503, '请在服务端 .env 填写北京地域的 API Key 和 Workspace ID，并重新启动。');
@@ -135,6 +149,19 @@ export function createApp({ store, key, workspace, upstream = fetch }) {
           throw fail(409, '当前连接已失效。');
         const offer = await body(req, 100000);
         if (!offer.startsWith('v=0') || !offer.includes('m=audio')) throw fail(400, '缺少音频连接描述。');
+        if (transport === 'gateway') {
+          const current = store.read(id, token);
+          if (current.connection !== s.connection || current.status !== 'open') throw fail(409, '当前连接已失效。');
+          gateways.get(id)?.abort();
+          const ctrl = new AbortController();
+          gateways.set(id, ctrl);
+          ctrl.signal.addEventListener('abort', () => gateways.delete(id), { once: true });
+          try {
+            const answer = await gatewayAnswer(offer, { key, workspace, model: MODEL, signal: ctrl.signal,
+              onClose: () => ctrl.abort() });
+            return reply(200, answer, 'application/sdp');
+          } catch (err) { ctrl.abort(); throw err; }
+        }
         const url =
           'https://' + workspace + '.cn-beijing.maas.aliyuncs.com/api/v1/webrtc/realtime?model=' + MODEL;
         const answer = await upstream(url, {
@@ -160,15 +187,19 @@ export function createApp({ store, key, workspace, upstream = fetch }) {
       });
     }
   });
+  app.once('close', () => { for (const ctrl of gateways.values()) ctrl.abort(); });
+  return app;
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   const dir = fileURLToPath(new URL('./data/', import.meta.url));
   mkdirSync(dir, { recursive: true });
-  const store = openStore(resolve(dir, 'review.sqlite'));
+  const store = openStore(resolve(dir, 'review.sqlite'), { catalog: loadKnowledge(),
+    turnMode: process.env.REVIEW_TURN_MODE, policy: process.env.CALLBACK_POLICY });
   const app = createApp({
     store,
     key: process.env.DASHSCOPE_API_KEY?.trim(),
     workspace: process.env.DASHSCOPE_WORKSPACE_ID?.trim(),
+    transport: process.env.REVIEW_TRANSPORT || (process.argv.includes('--gateway') ? 'gateway' : 'direct'),
   });
   const port = Number(process.env.PORT || 8765);
   app.listen(port, '127.0.0.1', () =>

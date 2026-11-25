@@ -58,22 +58,38 @@ function installTestPeer() {
       peer = new RTCPeerConnection();
       peer.addTrack(dest.stream.getAudioTracks()[0], dest.stream);
       channel = peer.createDataChannel('txt');
-      channel.onopen = () => emit({ type: 'session.created' });
+      let hasUserInput = false;
+      channel.onopen = () => {
+        if (window.fixture.dropNextSession) {
+          window.fixture.dropNextSession = false;
+          return;
+        }
+        emit({ type: 'session.created' });
+      };
       channel.onmessage = ({ data }) => {
         const e = JSON.parse(data);
         window.fixture.events.push(e.type);
         if (e.type === 'session.update') {
           window.fixture.config = e.session;
+          if (window.fixture.dropNextConfig) {
+            window.fixture.dropNextConfig = false;
+            return;
+          }
           emit({ type: 'session.updated' });
         }
         if (e.type === 'conversation.item.create') {
           if (e.item.type === 'function_call_output') {
             plan = JSON.parse(e.item.output);
             window.fixture.replies.push(plan);
-          } else msg = e.item.content[0].text;
+          } else if (e.item.role === 'user') hasUserInput = true;
+          else msg = e.item.content[0].text;
         }
         if (e.type === 'response.create') {
-          const words = plan?.say || msg || '';
+          if (!hasUserInput) {
+            emit({ type: 'error', error: { code: 'invalid_value', message: 'Cannot create response: no user message.' } });
+            return;
+          }
+          const words = plan?.say || msg?.split(/(?:完整|只)照读：/u).at(-1) || '';
           plan = null;
           msg = null;
           void speak(words, words.includes('第二项') ? 3800 : 1600);
@@ -247,9 +263,9 @@ test(
     const ui = (id) => run('document.getElementById(' + JSON.stringify(id) + ')?.textContent');
     const click = (id) => run('document.getElementById(' + JSON.stringify(id) + ').click()');
     const ask = (...args) => run('window.fixture.ask(...' + JSON.stringify(args) + ')');
-    const text = async (id, part) => {
+    const text = async (id, part, timeout) => {
       try {
-        return await until(async () => (await ui(id))?.includes(part), id + ' contains ' + part);
+        return await until(async () => (await ui(id))?.includes(part), id + ' contains ' + part, timeout);
       } catch (err) {
         throw new Error(
           err.message +
@@ -264,13 +280,20 @@ test(
     };
     await until(() => run('document.getElementById("start")?.disabled===false'), 'page ready');
     await run('(' + installTestPeer.toString() + ')()');
+    await run('window.fixture.dropNextConfig = true');
+    await run('window.fixture.dropNextSession = true');
     await click('start');
-    await text('transcript', '只作开场核身'); // the fixture echoes the opening instruction
+    await text('transcript', '只作开场核身', 32000); // the fixture echoes the opening instruction
+    assert.equal(await run('window.fixture.events.filter(t => t === "session.update").length'), 2);
+    assert.deepEqual(await run('[...document.querySelectorAll("#transcript b")].map(el => el.textContent)'), ['AI']);
     assert.equal(await run('window.fixture.config.turn_detection.type'), 'smart_turn_v2');
     await ask('请先告诉我缺什么', 'lookup_review_guidance', 'page');
     await text('tools', '查询材料依据 · 待核实');
     await text('transcript', '以便核实身份');
-    await ask('我是青禾商贸', 'verify_merchant');
+    await ask('我是清河商贸。', 'verify_merchant');
+    await text('transcript', '前两个字怎么写');
+    assert.equal(await run('document.querySelectorAll("#progress dd").length'), 1);
+    await ask('青草的青，禾苗的禾。', 'verify_merchant');
     await text('progress', '已核实');
     await until(() => run('window.fixture.speaking.includes("第二项")'), 'second material is being played');
     await delay(850);
@@ -294,12 +317,20 @@ test(
     await run('(' + installTestPeer.toString() + ')()');
     await click('start');
     await until(
-      () => run('window.fixture.speaking.includes("已恢复原通话")'),
+      () => run('window.fixture.speaking.includes("清楚了吗")'),
       'restored same verified call'
     );
+    await until(() => run(`(async () => {
+      const {id, token} = JSON.parse(sessionStorage.getItem('review-ticket'));
+      const s = await (await fetch('/api/calls/' + id, {headers:{Authorization:'Bearer ' + token}})).json();
+      return s.turns.some(t => t.connection === s.connection && t.speaker === 'AI' && t.text.includes('清楚了吗') && t.audibleMs > 500);
+    })()`), 'confirmation prompt played on restored connection');
+    await ask('两项我都清楚了，谢谢。', 'get_call_progress');
+    await text('transcript', '感谢您的确认和接听');
     await click('end');
     await text('status', '通话已结束');
     await text('result-summary', '2 项材料已讲完，0 项材料待跟进');
+    await text('result-summary', '商家已确认理解');
     assert.equal(await run('document.querySelectorAll("#transcript .replay").length>0'), true);
     await run('document.querySelector("#transcript .replay").click()');
     await run('document.querySelector("#record-evidence").checked = true');

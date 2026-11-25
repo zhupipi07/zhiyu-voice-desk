@@ -1,0 +1,296 @@
+{
+  "task": "核身后的本地回电待办意图",
+  "generated": 42,
+  "development": [
+    {
+      "version": "callback-v1",
+      "total": 49,
+      "correct": 35,
+      "causes": {
+        "漏掉回电": 6,
+        "误触发回电": 6,
+        "意愿状态判错": 2
+      },
+      "failures": [
+        {
+          "words": "请给我打个电话。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "请给我致电。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "烦请给我打个电话。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "烦请给我致电。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "麻烦您给我打个电话。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "麻烦您给我致电。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "我不希望你们再给我打电话。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "我不希望你们给我回电。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "我不想你再给我打电话。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "none",
+          "cause": "意愿状态判错"
+        },
+        {
+          "words": "我不想你给我回电。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "none",
+          "cause": "意愿状态判错"
+        },
+        {
+          "words": "你是说需要给我回电吗。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "你是说希望给我打电话吗。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "是不是需要给我回电吗。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "是不是希望给我打电话吗。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        }
+      ]
+    },
+    {
+      "version": "callback-attitude",
+      "total": 49,
+      "correct": 43,
+      "causes": {
+        "漏掉回电": 6
+      },
+      "failures": [
+        {
+          "words": "请给我打个电话。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "请给我致电。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "烦请给我打个电话。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "烦请给我致电。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "麻烦您给我打个电话。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "麻烦您给我致电。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        }
+      ]
+    },
+    {
+      "version": "callback-wording",
+      "total": 49,
+      "correct": 41,
+      "causes": {
+        "误触发回电": 6,
+        "意愿状态判错": 2
+      },
+      "failures": [
+        {
+          "words": "我不希望你们再给我打电话。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "我不希望你们给我回电。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "我不想你再给我打电话。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "none",
+          "cause": "意愿状态判错"
+        },
+        {
+          "words": "我不想你给我回电。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "none",
+          "cause": "意愿状态判错"
+        },
+        {
+          "words": "你是说需要给我回电吗。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "你是说希望给我打电话吗。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "是不是需要给我回电吗。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "是不是希望给我打电话吗。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        }
+      ]
+    },
+    {
+      "version": "callback-v2",
+      "total": 49,
+      "correct": 49,
+      "causes": {},
+      "failures": []
+    }
+  ],
+  "selected": "callback-v2",
+  "heldOut": {
+    "before": {
+      "version": "callback-v1",
+      "total": 15,
+      "correct": 11,
+      "causes": {
+        "漏掉回电": 1,
+        "意愿状态判错": 1,
+        "误触发回电": 2
+      },
+      "failures": [
+        {
+          "words": "有进展时烦劳您给我致电。",
+          "verified": true,
+          "expected": "callback",
+          "actual": "none",
+          "cause": "漏掉回电"
+        },
+        {
+          "words": "我不愿意你再给我打电话。",
+          "verified": true,
+          "expected": "declined",
+          "actual": "none",
+          "cause": "意愿状态判错"
+        },
+        {
+          "words": "你是否希望给我回电？",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        },
+        {
+          "words": "我没有说希望你们再给我打电话。",
+          "verified": true,
+          "expected": "clarify",
+          "actual": "callback",
+          "cause": "误触发回电"
+        }
+      ]
+    },
+    "after": {
+      "version": "callback-v2",
+      "total": 15,
+      "correct": 15,
+      "causes": {},
+      "failures": []
+    },
+    "regressions": []
+  },
+  "decision": "通过离线回归",
+  "configuredVersion": "callback-v2",
+  "rollbackVersion": "callback-v1"
+}

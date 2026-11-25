@@ -38,7 +38,8 @@ export function renderResult(s, example) {
   const verified = s.identity === 'verified';
   const wrongNumber = s.status === 'wrong_number';
   $('result-summary').textContent = verified
-    ? '已核实商家身份 · ' + complete.length + ' 项材料已讲完，' + pending.length + ' 项材料待跟进'
+    ? '已核实商家身份 · ' + complete.length + ' 项材料已讲完，' + pending.length + ' 项材料待跟进' +
+      (s.confirmation ? ' · 商家已确认理解' : ' · 尚无商家确认记录')
     : wrongNumber ? '接听方身份不符，需复核联系方式。' : '通话在核身完成前结束，需重新联系商家。';
 
   const completedList = $('completed-items');

@@ -1,15 +1,15 @@
 import { Playback } from './audio.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const systemMessage = (text) => ({
+const textMessage = (role, text) => ({
   type: 'conversation.item.create',
-  item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] },
+  item: { type: 'message', role, content: [{ type: 'input_text', text }] },
 });
 
 // One instance owns one peer connection. All durable writes go through the call's event queue.
 export class VoiceCall {
-  constructor({ config, restored, event, exchange, status, failure, current, recordEvidence }) {
-    Object.assign(this, { config, restored, event, exchange, status, failure, current, recordEvidence });
+  constructor({ event, exchange, status, failure, current, recordEvidence }) {
+    Object.assign(this, { event, exchange, status, failure, current, recordEvidence });
     this.playback = new Playback();
     this.epoch = 0;
     this.responses = new Map();
@@ -19,18 +19,21 @@ export class VoiceCall {
     this.saves = new Set();
     this.abort = new AbortController();
   }
-  async start() {
-    this.timer = setTimeout(
-      () => this.problem(new Error('等待 Flash 就绪超时，请检查网络或重连。')),
-      45000
-    );
+  waitFor(status, timeoutMessage) {
+    clearTimeout(this.timer);
+    this.status(status);
+    this.timer = setTimeout(() => this.problem(new Error(timeoutMessage)), 45000);
+  }
+  async start(connect) {
     if (!navigator.mediaDevices?.getUserMedia)
       throw new Error('请在本机 localhost 或 127.0.0.1 打开并允许使用麦克风。');
+    this.waitFor('正在启用声音', '浏览器未启用声音。请用 Chrome 或 Edge 打开本页并点击通话按钮。');
     await this.playback.open();
     if (this.closed) {
       await this.playback.close();
       return;
     }
+    this.waitFor('等待麦克风授权', '仍在等待麦克风。请在地址栏允许使用麦克风，再点击通话按钮。');
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true },
       video: false,
@@ -39,6 +42,20 @@ export class VoiceCall {
       this.stream.getTracks().forEach((t) => t.stop());
       return;
     }
+    this.waitFor('正在读取办理进度', '本地测试台未返回办理进度，请刷新页面重试。');
+    const result = await connect();
+    if (this.closed) return;
+    this.config = result.session;
+    this.restored = result.next;
+    await this.openPeer();
+  }
+  traceSetup(name) {
+    if (!this.config || this.closed) return;
+    void this.event({ type: 'setup', id: crypto.randomUUID(), name, attempt: this.retried ? 2 : 1,
+      atMs: this.playback.context.currentTime * 1000 }).catch(() => {});
+  }
+  async openPeer() {
+    this.waitFor(this.retried ? '正在重新建立语音连接' : '正在协商语音网络', '本机 WebRTC 网络协商超时，请重新连接。');
     const pc = (this.peer = new RTCPeerConnection());
     const media = pc.addTransceiver('audio', { direction: 'sendrecv' });
     this.sender = media.sender;
@@ -52,6 +69,13 @@ export class VoiceCall {
         this.problem(new Error('语音连接中断，已保存进度。可重新连接。'));
         return;
       }
+      if (pc.connectionState === 'connected' && !this.ready) {
+        this.traceSetup('connected');
+        if (!this.channel)
+          this.waitFor('等待百炼语音会话', '媒体连接已建立，但百炼未返回会话就绪消息。请重新连接。');
+        if (!this.retried && !this.setupRetry && !this.configSent)
+          this.setupRetry = setTimeout(() => this.retrySetup(), 15000);
+      }
       this.initialize();
     };
     this.bind(pc.createDataChannel('oai-events'));
@@ -61,14 +85,39 @@ export class VoiceCall {
       await sleep(50);
     if (this.closed) return;
     if (pc.iceGatheringState !== 'complete') throw new Error('本机网络未能完成 WebRTC 连接协商。');
-    this.status('正在连接百炼');
+    this.waitFor('正在连接百炼', '百炼未返回语音连接参数，请重新连接。');
     const sdp = await this.exchange(pc.localDescription.sdp, this.abort.signal);
-    if (!this.closed)
-      await pc.setRemoteDescription({ type: 'answer', sdp: sdp.trim().replace(/\r?\n/g, '\r\n') + '\r\n' });
+    if (this.closed) return;
+    this.waitFor('正在建立语音连接', '百炼已接受请求，但 WebRTC 媒体连接超时。请用 Chrome 或 Edge 重试，并检查网络是否允许 WebRTC。');
+    await pc.setRemoteDescription({ type: 'answer', sdp: sdp.trim().replace(/\r?\n/g, '\r\n') + '\r\n' });
+  }
+  retrySetup() {
+    if (this.closed || this.ready || this.retried) return;
+    this.traceSetup('retry');
+    this.retried = true;
+    clearTimeout(this.configRetry);
+    this.closePeer();
+    this.configSent = false;
+    this.openPeer().catch((err) => this.problem(err));
+  }
+  closePeer() {
+    if (this.peer) {
+      this.peer.onconnectionstatechange = this.peer.ondatachannel = this.peer.ontrack = null;
+    }
+    for (const channel of this.channels) {
+      channel.onopen = channel.onmessage = channel.onclose = null;
+      channel.close();
+    }
+    this.channels.clear();
+    this.channel = null;
+    this.peer?.close();
   }
   bind(channel) {
     this.channels.add(channel);
-    channel.onopen = () => this.initialize();
+    channel.onopen = () => {
+      this.traceSetup(channel.label === 'oai-events' ? 'client_channel_open' : 'server_channel_open');
+      this.initialize();
+    };
     channel.onclose = () => {
       if (this.channel === channel && !this.closed) this.problem(new Error('模型事件通道已关闭。'));
     };
@@ -95,15 +144,38 @@ export class VoiceCall {
     )
       return;
     this.configSent = true;
-    this.send({ type: 'session.update', session: this.config });
+    clearTimeout(this.setupRetry);
+    if (!this.retried) this.setupRetry = setTimeout(() => this.retrySetup(), 15000);
+    this.waitFor('正在配置语音模型', '百炼已建立语音通道，但未确认模型配置。请重新连接。');
+    const update = { type: 'session.update', session: this.config };
+    this.send(update);
+    this.configRetry = setTimeout(() => {
+      if (this.closed || this.ready) return;
+      this.status('正在重试语音模型配置');
+      try {
+        this.send(update);
+      } catch (err) {
+        this.problem(err);
+      }
+    }, 5000);
   }
   request(say, plan = {}) {
     this.nextPlan = plan;
-    if (say) this.send(systemMessage(say));
+    if (say) this.send(textMessage('system', say));
+    if (!this.openingRequested) {
+      // Flash requires a user input before the first response on each peer connection.
+      this.send(textMessage('user', '（系统自动接通提示）模拟电话已接通。请按坐席指令开始。'));
+      this.openingRequested = true;
+    } else if (say && (plan.point || plan.askConfirmation)) {
+      // A new controlled announcement has no new merchant audio. Give Flash
+      // an explicit workflow input so it does not replay the previous answer.
+      this.send(textMessage('user', '（系统播报任务，非商家发言）现在只向商家播读以下内容：' + plan.say));
+    }
     this.send({ type: 'response.create' });
   }
   problem(err) {
     if (!this.closed && !this.failing) {
+      if (!this.ready) this.traceSetup('failed');
       this.failing = true;
       this.failure(err);
     }
@@ -126,17 +198,20 @@ export class VoiceCall {
     if (e.event_id) this.seen.add(e.event_id);
     switch (e.type) {
       case 'session.created':
+        this.traceSetup('session_created');
         this.channel = channel;
         this.initialize();
         return;
       case 'session.updated':
         if (this.ready || !this.configSent) return;
+        this.traceSetup('session_updated');
         this.ready = true;
+        clearTimeout(this.configRetry);
+        clearTimeout(this.setupRetry);
         await this.sender.replaceTrack(this.stream.getAudioTracks()[0]);
         if (this.closed) return;
         if (this.recordEvidence) this.playback.record(this.stream, this.event, (err) => this.problem(err));
-        clearTimeout(this.timer);
-        this.status('通话中');
+        this.waitFor('等待坐席开场', '百炼已接通，但没有返回开场回复。请点击继续上次通话。');
         if (this.current().identity === 'verified' && this.current().pendingQuestion) {
           this.resumeNeeded = true;
           this.request(
@@ -150,8 +225,9 @@ export class VoiceCall {
         } else {
           this.request(
             this.current().identity === 'verified'
-              ? '已恢复原通话。' + this.restored.say
-              : '现在接通。请表明模拟 AI 资审专员身份，并请对方报出测试商家名称。只作开场核身。'
+              ? (this.restored.askConfirmation ? '已恢复原通话，请只照读：' : '已恢复原通话。') + this.restored.say
+              : '现在接通。请表明模拟 AI 资审专员身份，并请对方报出测试商家名称。只作开场核身。',
+            this.restored
           );
         }
         return;
@@ -171,6 +247,7 @@ export class VoiceCall {
           type: 'transcript',
           id: 'asr-' + e.item_id,
           turn: e.item_id,
+          atMs: this.playback.context.currentTime * 1000,
           text: e.transcript,
         });
         this.turns.get(e.item_id).written = true;
@@ -178,6 +255,7 @@ export class VoiceCall {
         return;
       }
       case 'response.created': {
+        clearTimeout(this.timer);
         const id = e.response.id;
         if (this.responses.has(id)) return;
         if (this.active) void this.finish(this.active, true, false).catch((err) => this.problem(err));
@@ -209,6 +287,12 @@ export class VoiceCall {
       }
       case 'response.done': {
         const r = this.responses.get(e.response.id);
+        const usage = e.response.usage;
+        if (r && usage && !r.usageSaved && Number.isSafeInteger(usage.input_tokens) && Number.isSafeInteger(usage.output_tokens)) {
+          r.usageSaved = true;
+          void this.event({ type: 'usage', id: 'usage-' + r.id, response: r.id,
+            inputTokens: usage.input_tokens, outputTokens: usage.output_tokens }).catch(() => {});
+        }
         if (!r || r.done || r.finished) return;
         r.done = true;
         for (const item of e.response.output || []) {
@@ -233,7 +317,13 @@ export class VoiceCall {
         return;
       }
       case 'error':
-        throw new Error('Flash 返回错误：' + (e.error?.code || e.error?.message || '未知错误'));
+        // A new automatic VAD response can win the race with a tool continuation.
+        // Its own response.created/done events still own the audio and turn.
+        if (e.error?.code === 'invalid_value' && /cannot create response while another response is in progress/i.test(e.error.message)) {
+          this.nextPlan = null;
+          return;
+        }
+        throw new Error('Flash 返回错误：' + ([e.error?.code, e.error?.message].filter(Boolean).join(' · ').slice(0, 300) || '未知错误'));
       default:
         return;
     }
@@ -275,7 +365,7 @@ export class VoiceCall {
       });
       plan = out;
     }
-    if (live()) this.request(null, plan);
+    if (live() && !this.active) this.request(null, plan);
   }
   finish(r, interrupted, drained) {
     if (r.finished) return r.saving || Promise.resolve();
@@ -303,6 +393,7 @@ export class VoiceCall {
       text: r.text,
       point: r.plan.point || r.plan.relatedPoint || null,
       questionTurn: r.plan.questionTurn || null,
+      askConfirmation: r.plan.askConfirmation === true,
       interrupted,
       drained: drained && !clip.truncated,
       pcm: clip.pcm,
@@ -318,17 +409,20 @@ export class VoiceCall {
     if ((completed || resume) && data.result.next?.point) {
       this.resumeNeeded = false;
       this.request('接着向商家说明下一项，请完整照读：' + data.result.next.say, data.result.next);
+    } else if ((completed || answered) && data.result.next?.askConfirmation && !data.snapshot.questions.length) {
+      this.request('请向商家核对办理结果，完整照读：' + data.result.next.say, data.result.next);
     }
   }
   async close() {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.timer);
+    clearTimeout(this.configRetry);
+    clearTimeout(this.setupRetry);
     this.abort.abort();
     this.stream?.getTracks().forEach((t) => t.stop());
     if (this.active) this.finish(this.active, true, false);
-    for (const channel of this.channels) channel.close();
-    this.peer?.close();
+    this.closePeer();
     try {
       await Promise.all(this.saves);
     } finally {

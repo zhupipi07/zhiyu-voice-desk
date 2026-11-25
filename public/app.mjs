@@ -82,7 +82,7 @@ function render(s) {
   const downloads = $('evidence-downloads');
   downloads.hidden = !ticket || !s || s.status === 'open' || example;
   if (!downloads.hidden) {
-    downloads.replaceChildren(downloadButton('下载逐轮质检记录', '/evidence', ticket.id + '.json'));
+    downloads.replaceChildren(downloadButton('下载合规初筛与逐轮记录', '/evidence', ticket.id + '.json'));
     for (const [index, [conn, rec]] of Object.entries(s.recordings || {}).entries()) {
       if (rec.samples) downloads.append(downloadButton('连接 ' + (index + 1) + ' 双声道录音' + (rec.finished ? '' : '（片段）'),
         '/recordings/' + conn, ticket.id + '-' + conn + '.wav'));
@@ -91,6 +91,7 @@ function render(s) {
   const log = $('transcript');
   log.replaceChildren();
   for (const t of s?.turns || []) {
+    if (t.speaker === 'AI' && !t.text?.trim() && !t.audibleMs) continue;
     const li = document.createElement('li'),
       who = document.createElement('b');
     who.textContent = t.speaker;
@@ -212,52 +213,55 @@ $('start').onclick = async () => {
   stopReplay();
   setNotice('');
   buttons();
-  uiStatus('正在准备麦克风');
+  const transport = new VoiceCall({
+    recordEvidence: $('record-evidence').checked,
+    event,
+    current: () => state,
+    status: (message) => {
+      online = transport.ready;
+      if (online) startedAt ||= Date.now();
+      uiStatus(message);
+      buttons();
+    },
+    failure: (err) => {
+      if (voice === transport) void stop(false, err.message);
+    },
+    exchange: async (sdp, signal) =>
+      (
+        await request(route('/sdp'), {
+          method: 'POST',
+          signal,
+          headers: { 'Content-Type': 'application/sdp', 'X-Connection': connection },
+          body: sdp,
+        })
+      ).text(),
+  });
+  voice = transport;
   try {
-    if (!ticket || state?.status !== 'open') {
-      const response = await (await request('/api/calls', { method: 'POST' })).json();
-      ticket = { id: response.id, token: response.token };
-      render(response.snapshot);
-      sessionStorage.setItem('review-ticket', JSON.stringify(ticket));
-    }
-    connection = null;
-    const { result, snapshot } = await event({ type: 'connect', id: crypto.randomUUID() });
-    connection = snapshot.connection;
-    const transport = new VoiceCall({
-      config: result.session,
-      recordEvidence: $('record-evidence').checked,
-      restored: result.next,
-      event,
-      current: () => state,
-      status: (message) => {
-        online = transport.ready;
-        if (online) startedAt ||= Date.now();
-        uiStatus(message);
-        buttons();
-      },
-      failure: (err) => {
-        if (voice === transport) void stop(false, err.message);
-      },
-      exchange: async (sdp, signal) =>
-        (
-          await request(route('/sdp'), {
-            method: 'POST',
-            signal,
-            headers: { 'Content-Type': 'application/sdp', 'X-Connection': connection },
-            body: sdp,
-          })
-        ).text(),
+    // Start audio in the click handler while the browser still grants user activation.
+    await transport.start(async () => {
+      if (!ticket || state?.status !== 'open') {
+        const response = await (await request('/api/calls', { method: 'POST', signal: transport.abort.signal })).json();
+        ticket = { id: response.id, token: response.token };
+        render(response.snapshot);
+        sessionStorage.setItem('review-ticket', JSON.stringify(ticket));
+      }
+      connection = null;
+      const { result, snapshot } = await event({ type: 'connect', id: crypto.randomUUID() });
+      connection = snapshot.connection;
+      return result;
     });
-    voice = transport;
-    await transport.start();
   } catch (err) {
+    if (voice !== transport) return;
     await stop(
       false,
-      err.name === 'NotAllowedError' ? '麦克风权限被拒绝，请在地址栏允许后重新连接。' : err.message
+      err.name === 'NotAllowedError' ? '浏览器未允许使用麦克风。请在地址栏授权，或用 Chrome 或 Edge 打开本页重试。' : err.message
     );
   } finally {
-    busy = false;
-    buttons();
+    if (voice === transport) {
+      busy = false;
+      buttons();
+    }
   }
 };
 $('end').onclick = () => stop(true);
@@ -270,6 +274,7 @@ async function init() {
     }
     const health = await (await request('/api/status')).json();
     apiReady = health.ready;
+    if (health.transport === 'gateway') $('model').textContent = 'Qwen-Audio 3.1 Flash · 本地 WebRTC 网关';
     const saved = sessionStorage.getItem('review-ticket');
     if (saved) {
       try {

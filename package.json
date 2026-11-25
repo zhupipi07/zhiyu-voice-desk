@@ -2,11 +2,19 @@
   "name": "zhiyu-voice-desk",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "test": "node --test",
     "eval:callback": "node scripts/evaluate-callback.mjs",
-    "eval:latency": "node scripts/evaluate-latency.mjs"
+    "eval:latency": "node scripts/evaluate-latency.mjs",
+    "eval:quality": "node scripts/evaluate-quality.mjs",
+    "eval:rsi": "node scripts/evaluate-rsi.mjs",
+    "route": "node scripts/inspect-route.mjs"
+  },
+  "optionalDependencies": {
+    "@roamhq/wrtc": "0.10.0"
   }
 }

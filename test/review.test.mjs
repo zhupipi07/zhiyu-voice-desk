@@ -9,8 +9,8 @@ import { createApp } from '../server.mjs';
 
 const sound = Buffer.alloc(48000);
 for (let i = 0; i < sound.length; i += 2) sound.writeInt16LE(i % 4 ? 4000 : -4000, i);
-function setup(t, file = ':memory:') {
-  const store = openStore(file);
+function setup(t, file = ':memory:', options) {
+  const store = openStore(file, options);
   t.after(() => store.close());
   const call = store.create();
   let connection;
@@ -48,6 +48,26 @@ test('only the current verified merchant can retrieve the synthetic review mater
   assert.equal(store.read(call.id, call.token).receipt, null);
   assert.deepEqual(store.read(call.id, call.token).points, []);
   assert.throws(() => send('tool', { turn: q, name: 'get_call_progress' }), /已结束/);
+});
+test('a homophonic merchant name needs independent spelling before materials are disclosed', (t) => {
+  const { store, call, say, tool, connect } = setup(t);
+  const verify = (words) => tool(say(words), 'verify_merchant');
+  assert.equal(verify('青草的青，禾苗的禾。').ok, false);
+  for (const text of ['我是清河商贸。', '清河商贸。']) {
+    const result = verify(text);
+    assert.equal(result.ok, false);
+    assert.match(result.say, /前两个字怎么写/);
+    assert.doesNotMatch(result.say, /青|禾/);
+    assert.deepEqual(store.read(call.id, call.token).points, []);
+  }
+  assert.equal(verify('清水的清，河流的河。').ok, false);
+  verify('清河商贸');
+  connect();
+  assert.equal(verify('青草的青，禾苗的禾。').ok, false);
+  verify('清河商贸');
+  assert.equal(verify('我是其他商贸，青草的青，禾苗的禾。').ok, false);
+  verify('清河商贸');
+  assert.equal(verify('第一个字是青草的青，第二个字是禾苗的禾。').point, 'chain');
 });
 test('hangup preserves partial notice and issues one simulated opinion per case revision', (t) => {
   const { call, store, say, send, tool } = setup(t);
@@ -259,6 +279,52 @@ test('SQLite retains review progress and output evidence across process restarts
   } finally {
     restored.close();
   }
+});
+test('confirmed completion needs an audible prompt and a later merchant confirmation', (t) => {
+  const { store, call, send, say, tool } = setup(t);
+  let turn = say('我是青禾商贸');
+  const first = tool(turn, 'verify_merchant');
+  const play = (plan, fields) => send('playback', { turn, text: plan.say, point: plan.point,
+    askConfirmation: plan.askConfirmation, pcm: sound.toString('base64'), drained: true, interrupted: false, ...fields });
+  const second = play(first).result.next;
+  const prompt = play(second).result.next;
+  assert.equal(prompt.askConfirmation, true);
+  play(prompt, { interrupted: true });
+  turn = say('我都清楚了');
+  assert.equal(store.read(call.id, call.token).confirmation, null);
+  play(prompt);
+  turn = say('没听明白');
+  assert.equal(store.read(call.id, call.token).confirmation, null);
+  play(prompt);
+  turn = say('这两项我都明白了，谢谢');
+  assert.equal(store.read(call.id, call.token).confirmation.turn, turn);
+  assert.match(tool(turn, 'get_call_progress').say, /感谢/);
+  send('end');
+  assert.equal(store.report(call.id, call.token).quality.closedLoop, true);
+});
+test('a call preserves its VAD and callback policy, including a configured rollback', (t) => {
+  const { store, call, send, say, tool } = setup(t, ':memory:', { turnMode: 'server_vad', policy: 'callback-v1' });
+  send('setup', { name: 'connected', attempt: 1, atMs: 150 });
+  tool(say('我是青禾商贸'), 'verify_merchant');
+  say('烦请给我致电。');
+  assert.equal(store.read(call.id, call.token).callback, null);
+  const c = store.report(call.id, call.token).connections[0];
+  assert.deepEqual(c.turnDetection, { type: 'server_vad', silence_duration_ms: 450 });
+  assert.deepEqual(c.setup, [{ name: 'connected', attempt: 1, atMs: 150 }]);
+});
+test('QA retains audio locators and separates interrupted and inaudible risks from complete clips', (t) => {
+  const { store, call, send, say, tool } = setup(t);
+  const clip = { pcm: sound.toString('base64'), drained: true, interrupted: false, startMs: 100 };
+  send('playback', { ...clip, id: 'early', text: '请补交盖章页。' });
+  send('playback', { ...clip, id: 'cut', text: '我保证通过。', interrupted: true });
+  send('playback', { ...clip, id: 'inaudible', text: '请提供支付密码。', pcm: '' });
+  const turn = say('我是青禾商贸');
+  send('tool', { name: 'verify_merchant', turn, atMs: 4000 });
+  send('playback', { ...clip, id: 'ok', turn, text: '补交盖章页，无法提前保证通过。', startMs: 5000 });
+  const q = store.report(call.id, call.token).quality;
+  assert.deepEqual(q.findings.filter((f) => f.status === 'hit').map((f) => [f.rule, f.event]), [['privacy', 'early']]);
+  assert.ok(q.findings.some((f) => f.rule === 'promise' && f.status === 'review' && f.clip));
+  assert.equal(q.findings.some((f) => f.rule === 'solicitation'), false);
 });
 test('SDP forwarding uses the configured Flash model and never returns the server credential', async (t) => {
   const store = openStore(':memory:');

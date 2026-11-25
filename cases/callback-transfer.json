@@ -1,0 +1,10 @@
+[
+  {"words":"有进展时烦劳您给我致电。","expect":"callback","verified":true},
+  {"words":"我不愿意你再给我打电话。","expect":"declined","verified":true},
+  {"words":"你是否希望给我回电？","expect":"clarify","verified":true},
+  {"words":"如果你不清楚，能在后台查工单吗？","expect":"none","verified":true},
+  {"words":"有劳您给我回个电话。","expect":"callback","verified":true},
+  {"words":"我没有说希望你们再给我打电话。","expect":"clarify","verified":true},
+  {"words":"授权书上要填联系电话吗？","expect":"none","verified":true},
+  {"words":"请给我致电。","expect":"none","verified":false}
+]
