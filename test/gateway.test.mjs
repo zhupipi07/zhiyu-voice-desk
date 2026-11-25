@@ -46,7 +46,8 @@ test('gateway forwards real PCM formats, clears interrupted output and stops bot
   cloud({ type: 'session.updated' });
   for (let i = 0; i < 20; i++) sink.ondata(frame);
   const input = Buffer.from(upstream[0].audio, 'base64');
-  assert.equal(input.length, 20 * 160 * 2);
+  assert.equal(input.length, 10 * 160 * 2);
+  assert.equal(upstream.length,2);
   assert.equal(input.readInt16LE(0), 1200);
   const audio = Buffer.alloc(9600);
   audio.fill(Buffer.from([0xb0, 0x04]));
@@ -62,4 +63,23 @@ test('gateway forwards real PCM formats, clears interrupted output and stops bot
   assert.ok(downstream.some((e) => e.type === 'session.updated'));
   ctrl.abort();
   assert.ok(source && peerClosed && cloudClosed);
+
+  // Screened output stays silent until the complete transcript is approved.
+  const blocked = [], gateCtrl = new AbortController();
+  t.after(()=>gateCtrl.abort());
+  await gatewayAnswer('offer',{key:'test',workspace:'test',model:'test',signal:gateCtrl.signal,rtc,
+    openSocket:()=>ws,screen:text => text === '安全话术' ? '' : '承诺审核结果',
+    onBlocked:(...event)=>blocked.push(event)});
+  pc.ondatachannel({channel:{label:'oai-events',readyState:'open',send:raw=>downstream.push(JSON.parse(raw)),close(){}}});
+  const begin=id=>{cloud({type:'response.created',response:{id}});cloud({type:'response.audio.delta',response_id:id,delta:audio.toString('base64')});};
+  const finish=(id,text)=>cloud({type:'response.done',response:{id,status:'completed',output:[{content:[{transcript:text}]}]}});
+  let offset=played.length;
+  begin('unsafe');await delay(35);finish('unsafe','保证通过');await delay(35);
+  assert.ok(played.length>offset && played.slice(offset).every(p=>p.sample===0));
+  assert.equal(blocked[0][0],'unsafe');
+  assert.ok(downstream.some(e=>e.type==='review.output_blocked'));
+  begin('safe');offset=played.length;await delay(35);
+  assert.ok(played.slice(offset).every(p=>p.sample===0));
+  finish('safe','安全话术');await delay(35);
+  assert.ok(played.slice(offset).some(p=>p.sample===1200));
 });

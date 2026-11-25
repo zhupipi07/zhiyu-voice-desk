@@ -1,34 +1,17 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { callbackIntent, callbackPolicies, callbackVersion, deniesIdentity } from './contact.mjs';
-import { guidanceTopic } from './guidance.mjs';
+import { guidanceTopic, guidanceVersions } from './guidance.mjs';
 import { evidenceReport, voiceFrames } from './evidence.mjs';
 import { disposition, lookupFaq } from './knowledge.mjs';
 
+import { fixedSpeech, audioKey, promptAudio } from './prompt-audio.mjs';
+import { speechRisks } from './quality.mjs';
+import { demoApplications, legacyApplication, applicationOf, routeApplication, identify, opinion, pointScript,
+  commonAnswers, sourceLabel } from './applications.mjs';
+
 export const MODEL = 'qwen-audio-3.1-realtime-flash';
-const caseId = 'POP-DEMO-018',
-  revision = 1;
-const materials = [
-  {
-    id: 'chain',
-    title: '授权链路',
-    prefix: '第一项，',
-    requirement: '请补交品牌方到经销商的授权书，补齐中间的授权关系。',
-    terms: ['品牌方', '经销商', '授权书'],
-  },
-  {
-    id: 'seal',
-    title: '盖章页',
-    prefix: '第二项，',
-    requirement: '请补交授权书的盖章页。请确认这页能看清双方公司名称、印章和授权有效期，再上传完整页面。',
-    terms: ['盖章页', '公司名称', '印章', '有效期', '上传'],
-  },
-];
-const notes = {
-  page: '要补的是授权书的盖章页，请找有双方印章的那一页。按内容认页，没有指定页码。',
-  channel: '在本次模拟中，从京麦该申请的补充材料入口上传，然后重新提交审核。',
-  result: '补齐后会重新审核，无法提前保证通过。',
-};
+const caseId = legacyApplication.caseId, revision = legacyApplication.revision;
 const instructions = [
   '你是京东开放平台资审电话的模拟 AI 专员，使用简短的普通话。来电仅供测试，所有材料均为合成案例。',
   '主动开场说明 AI 身份，请对方主动报出测试商家名称。不得猜测、提示正确名称或索要真实个人信息。',
@@ -36,7 +19,7 @@ const instructions = [
   '按工具结果中的 say 说话。如有 point 或 questionTurn，请完整照读该答复，一次只讲一项。系统会安排下一项。不自行编造后续材料。',
   '被打断后先回答最新追问。问原因、材料、页码、上传路径或能否通过，必须调用 lookup_review_guidance。问还有哪项、要求继续时调用 get_call_progress，再按结果回答。',
   '工具返回无依据就说明需要核实。不能承诺审核通过，不宣称已实际向京麦提交。',
-  '商家追问店铺操作、品牌资质或一般业务问题也要查询 lookup_review_guidance，无法归类时传 unknown。商家确认两项要求都已清楚后调用 get_call_progress，按结果礼貌结束。',
+  '商家追问店铺操作、品牌资质或一般业务问题也要查询 lookup_review_guidance，无法归类时传 unknown。商家确认本单要求都已清楚后调用 get_call_progress，按结果礼貌结束。',
 ].join('\n');
 const fn = (name, description, properties = {}) => ({
   type: 'function',
@@ -47,13 +30,13 @@ const fn = (name, description, properties = {}) => ({
   },
 });
 export function sessionConfig(turnMode = 'smart_turn_v2') {
-  if (!['smart_turn_v2', 'server_vad'].includes(turnMode)) throw new Error('未知的轮次检测模式');
+  if (!['smart_turn_v2', 'server_vad','server_vad_750','local_vad'].includes(turnMode)) throw new Error('未知的轮次检测模式');
   return {
     modalities: ['audio', 'text'],
     voice: 'longanqian_v3.1',
     instructions,
     input_audio_transcription: { language: 'zh' },
-    turn_detection: turnMode === 'server_vad' ? { type: turnMode, silence_duration_ms: 450 } : { type: turnMode },
+    turn_detection: turnMode === 'local_vad' ? null : turnMode === 'smart_turn_v2' ? {type:turnMode} : {type:'server_vad',silence_duration_ms:turnMode === 'server_vad_750' ? 750 : 450},
     tools: [
       fn('verify_merchant', '根据本轮商家发言核验身份。'),
       fn('get_call_progress', '查询已讲和待补讲事项，按 say 继续。'),
@@ -66,20 +49,6 @@ export function sessionConfig(turnMode = 'smart_turn_v2') {
 export const fail = (status, message) => Object.assign(new Error(message), { status });
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const normalize = (text) => text.normalize('NFKC').replace(/[\s\p{P}]/gu, '');
-const matches = (text) =>
-  /^(?:您好|你好|对|是的|没错|好的|嗯)*(?:我们是|我是|这里是|这边是|是|我代表|我们公司叫|公司名称是|公司叫)?青禾商贸(?:有限公司|有限责任公司)?(?:的|的负责人|没错|对|是我)?$/.test(
-    text
-  );
-// A homophone can prompt a spelling question but cannot establish identity by itself.
-const soundsLikeMerchant = (words) => matches(words.replace(/[青清][禾河]商贸/u, '青禾商贸'));
-function confirmsSpelling(words, previousMerchant) {
-  const spelling = /^(.*?)(?:(?:第一个字|青|清)是|是)?(?:青草|青色|青春|青山|青菜)的[青清](?:(?:第二个字|禾|河)是|是)?(?:禾苗|禾本科|禾田)的[禾河](?:商贸)?$/u.exec(words);
-  return spelling && soundsLikeMerchant(spelling[1] || normalize(previousMerchant?.text || ''));
-}
-
-const pointScript = (point) => point.prefix + point.requirement;
-const writtenOpinion = materials.map((point) => point.requirement).join('\n');
-const guidanceAnswers = { ...notes, chain: pointScript(materials[0]) };
 const minSpeechMs = (text) => Math.max(500, normalize(text).length * 40);
 
 function questions(s) {
@@ -96,7 +65,7 @@ function snapshot(s) {
     status: s.status,
     identity: s.identity,
     points: s.identity === 'verified'
-      ? materials.map(({ id, title, requirement }) => ({ id, title, requirement, status: s.points[id] }))
+      ? applicationOf(s).materials.map(({ id, title, requirement }) => ({ id, title, requirement, status: s.points[id] }))
       : [],
     turns: s.turns,
     tools: s.tools,
@@ -104,8 +73,11 @@ function snapshot(s) {
     questions: questions(s),
     callback: s.callback ?? null,
     callbackPolicy: s.callbackPolicy ?? 'callback-v1',
+    guidancePolicy:s.guidancePolicy ?? 'grounded-v1',
     confirmation: s.confirmation ?? null,
-    routing: s.identity === 'verified' ? s.routing ?? null : null,
+    routing: s.identity === 'verified' || s.handling ? s.routing ?? null : null,
+    handling: s.handling ?? null,
+    handoff: s.handoff ?? null,
     recordings: s.recordings ?? {},
     connection: s.connection,
     receipt: s.receipt ?? null,
@@ -116,14 +88,15 @@ export function partialResultExample() {
   return snapshot({
     status: 'ended', identity: 'verified', points: { chain: 'complete', seal: 'partial' },
     turns: [], tools: [], pendingQuestion: null, connection: null,
-    receipt: { number: 'JM-EXAMPLE-018', issuedAt: null, opinion: writtenOpinion },
+    receipt: { number: 'JM-EXAMPLE-018', issuedAt: null, opinion: opinion(legacyApplication) },
   });
 }
 
 export function openStore(file, { catalog = null, readOnly = false, turnMode = 'smart_turn_v2',
-  policy = callbackVersion } = {}) {
+  policy = callbackVersion, applications = demoApplications, guidancePolicy = 'grounded-v2', promptDir = null } = {}) {
   if (!Object.hasOwn(callbackPolicies, policy)) throw new Error('未知回电策略版本');
   sessionConfig(turnMode);
+  if (!guidanceVersions.includes(guidancePolicy)) throw new Error('未知材料问答版本');
   const db = new DatabaseSync(file, { readOnly });
   if (!readOnly) db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=4000;
     CREATE TABLE IF NOT EXISTS review_calls (id TEXT PRIMARY KEY, token TEXT NOT NULL, state TEXT NOT NULL);
@@ -133,6 +106,9 @@ export function openStore(file, { catalog = null, readOnly = false, turnMode = '
     CREATE TABLE IF NOT EXISTS review_recording_chunks (
       call TEXT NOT NULL, connection TEXT NOT NULL, offset INTEGER NOT NULL, pcm BLOB NOT NULL,
       PRIMARY KEY(call, connection, offset));
+    CREATE TABLE IF NOT EXISTS review_jobs (
+      case_id TEXT NOT NULL, revision INTEGER NOT NULL, kind TEXT NOT NULL, owner TEXT,
+      status TEXT NOT NULL, PRIMARY KEY(case_id,revision,kind));
     CREATE TABLE IF NOT EXISTS review_receipts (
       case_id TEXT NOT NULL, revision INTEGER NOT NULL, number TEXT NOT NULL UNIQUE,
       issued_at TEXT NOT NULL, opinion TEXT NOT NULL, PRIMARY KEY(case_id, revision));`);
@@ -145,12 +121,27 @@ export function openStore(file, { catalog = null, readOnly = false, turnMode = '
     const application = s.caseId ?? caseId, version = s.revision ?? revision;
     db.prepare(`INSERT INTO review_receipts (case_id, revision, number, issued_at, opinion)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(case_id, revision) DO NOTHING`)
-      .run(application, version, 'JM-SIM-' + application + '-R' + version, new Date().toISOString(), writtenOpinion);
+      .run(application, version, 'JM-SIM-' + application + '-R' + version, new Date().toISOString(), opinion(applicationOf(s)));
     const receipt = db.prepare(`SELECT number, issued_at AS issuedAt, opinion FROM review_receipts
       WHERE case_id=? AND revision=?`).get(application, version);
     return { ...receipt };
   }
-  function create() {
+  function cards() {
+    return applications.map(a => {
+      const routing = routeApplication(a, catalog);
+      return {caseId:a.caseId, revision:a.revision, merchant:a.merchant, categories:a.categories, facts:a.facts,
+        spelling:a.spelling?.map(p => p.words[0] + '的' + p.forms[0]).join('，') ?? null, routing};
+    });
+  }
+  function job(s, kind) {
+    db.prepare("INSERT OR IGNORE INTO review_jobs(case_id, revision, kind, status) VALUES(?,?,?,'pending')")
+      .run(s.caseId ?? caseId,s.revision ?? revision,kind);
+    return kind + '-' + (s.caseId ?? caseId) + '-R' + (s.revision ?? revision);
+  }
+  function create(selected = applications[0].caseId) {
+    const application = applications.find(a => a.caseId === selected);
+    if (!application) throw fail(404,'找不到指定案卷。');
+    const {caseId, revision} = application;
     const id = randomUUID(),
       token = randomBytes(32).toString('base64url');
     const state = {
@@ -158,45 +149,92 @@ export function openStore(file, { catalog = null, readOnly = false, turnMode = '
       revision,
       status: 'open',
       identity: 'pending',
-      callbackPolicy: policy,
+      callbackPolicy: policy, guidancePolicy,
       turnMode,
       connection: null,
       turn: null,
-      points: { chain: 'pending', seal: 'pending' },
+      application,
+      points: Object.fromEntries(application.materials.map(m => [m.id,'pending'])),
       turns: [],
       tools: [],
       pendingQuestion: null,
     };
-    if (catalog) {
-      const scenario = catalog.scenarios.find(({ categories: [menu, family, reason] }) =>
-        menu === '入驻' && family === '授权书-文审' && reason === '授权链路不完整');
-      state.routing = disposition(scenario);
-      if (state.routing.action !== 'call') throw fail(409, '该申请缺少允许外呼的业务依据，请复核资料版本。');
-    }
-    db.prepare('INSERT INTO review_calls VALUES(?,?,?)').run(id, digest(token), JSON.stringify(state));
+    state.routing = routeApplication(application,catalog);
+    const {action} = state.routing;
+    if (action === 'review') throw fail(409,'该申请缺少分流依据，请核对业务资料。');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (action === 'written') {
+        state.handling = {action};
+        state.receipt = writeReceipt(state);
+        state.status = 'ended';
+      } else if (action === 'retry' || action === 'callback') {
+        state.handling = {action, job:job(state,action)};
+        state.status = 'scheduled';
+        const prior = db.prepare('SELECT status FROM review_jobs WHERE case_id=? AND revision=? AND kind=?')
+          .get(caseId,revision,action);
+        if (prior.status === 'written') {
+          state.status = 'ended';
+          state.receipt = writeReceipt(state);
+          state.handling.outcome = 'missed';
+        } else if (prior.status !== 'pending') state.handling.outcome = prior.status;
+      }
+      db.prepare('INSERT INTO review_calls VALUES(?,?,?)').run(id, digest(token), JSON.stringify(state));
+      db.exec('COMMIT');
+    } catch (err) { db.exec('ROLLBACK'); throw err; }
     return { id, token, snapshot: snapshot(state) };
   }
+  function dispatch(id,token,decision) {
+    if (!['dial','missed'].includes(decision)) throw fail(400,'未知跟进动作。');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const s = load(id,token), h = s.handling;
+      if (!['retry','callback'].includes(h?.action)) throw fail(409,'该案卷没有待处理的外呼任务。');
+      const row = db.prepare('SELECT * FROM review_jobs WHERE case_id=? AND revision=? AND kind=?')
+        .get(s.caseId,s.revision,h.action);
+      if (row.status === 'pending') {
+        if (decision === 'missed' && h.action === 'callback') throw fail(409,'强制回电任务须保留人工跟进。');
+        const status = decision === 'dial' ? 'in_progress' : 'written';
+        db.prepare('UPDATE review_jobs SET status=?,owner=? WHERE case_id=? AND revision=? AND kind=?')
+          .run(status,id,s.caseId,s.revision,h.action);
+        h.outcome = decision === 'dial' ? 'in_progress' : 'missed';
+        s.status = decision === 'dial' ? 'open' : 'ended';
+        if (decision === 'missed') s.receipt = writeReceipt(s);
+        db.prepare('UPDATE review_calls SET state=? WHERE id=?').run(JSON.stringify(s),id);
+      } else if (!(row.owner === id && ((decision === 'dial' && s.status === 'open') ||
+          (decision === 'missed' && h.outcome === 'missed')))) throw fail(409,'该任务已在其他步骤办理。');
+      db.exec('COMMIT');
+      return snapshot(s);
+    } catch (err) { db.exec('ROLLBACK'); throw err; }
+  }
   function progress(s) {
-    if (s.identity !== 'verified') return { ok: false, say: '请先报出本次测试商家名称，以便核实身份。' };
-    if (s.confirmation) return { ok: true, say: '感谢您的确认和接听，祝您生活愉快，再见。' };
-    const next = materials.find((p) => s.points[p.id] !== 'complete');
+    if (s.identity !== 'verified') return { ok: false, say: fixedSpeech.askName };
+    if (s.confirmation) return { ok: true, say: fixedSpeech.confirmed };
+    if (s.handoff) return {ok:true, say:fixedSpeech.handoff};
+    const a = applicationOf(s);
+    const next = a.materials.find((p) => s.points[p.id] !== 'complete');
     return next
-      ? { ok: true, point: next.id, say: pointScript(next), source: '合成资审单 POP-DEMO-018 / v1' }
-      : { ok: true, askConfirmation: true, say: '两项整改要求已说明。请问您都清楚了吗，还有哪项需要再说明？' };
+      ? { ok: true, point: next.id, say: pointScript(next), source: sourceLabel(a) }
+      : { ok: true, askConfirmation: true, say: a.materials.length === 2 ? fixedSpeech.confirmTwo : fixedSpeech.confirmOther };
   }
   function apply(s, e, audibleMs) {
+    const a = applicationOf(s), materials = a.materials;
     const currentSpeech = () =>
       s.turns.find((t) => t.connection === s.connection && t.item === e.turn && t.speaker === '商家');
     if (e.type === 'end' && s.status === 'ended' && s.connection === e.connection) return {};
     if (s.status !== 'open' && !['playback', 'recording', 'marker'].includes(e.type)) throw fail(409, '此通电话已结束，请发起新通话。');
     if (e.type === 'connect') {
       s.connection = randomUUID();
+      s.localSpeech = ['gateway','local'].includes(e.transport) && Boolean(promptDir);
+      s.offline = e.transport === 'local';
+      if (s.turnMode === 'local_vad' && !['gateway','local'].includes(e.transport)) throw fail(409,'本地断句需要以网关模式启动。');
       s.turn = null;
       s.confirmationPrompt = null;
-      return { connection: s.connection, session: sessionConfig(s.turnMode), next: progress(s) };
+      return { connection: s.connection, offline:s.offline, listenerCue:e.listenerCue === true, turnMode:s.turnMode, session: sessionConfig(s.turnMode), next: (s.offline && s.identity === 'verified' && questions(s).length) ? {say:fixedSpeech.repeatQuestion} : progress(s),
+        ...(s.identity === 'pending' && s.localSpeech && {opening:{say:fixedSpeech.opening}}) };
     }
     if (s.connection !== e.connection || !s.connection) throw fail(409, '通话连接已更换。');
-    if (['marker', 'recording', 'setup', 'usage'].includes(e.type)) return {};
+    if (['marker', 'recording', 'setup', 'usage', 'blocked'].includes(e.type)) return {};
     if (e.type === 'turn') {
       s.turn = e.turn;
       if (!currentSpeech())
@@ -205,51 +243,77 @@ export function openStore(file, { catalog = null, readOnly = false, turnMode = '
       const turn = currentSpeech();
       if (!turn) throw fail(409, '缺少对应的语音轮次。');
       turn.text = e.text;
-      if (s.turn === e.turn && deniesIdentity(e.text)) {
+      if (s.turn === e.turn && deniesIdentity(e.text,a.merchant)) {
         s.identity = 'denied';
         s.status = 'wrong_number';
+        s.handoff = null;
         s.questions = [];
         s.callback = null;
         s.confirmation = null;
       } else if (s.turn === e.turn) {
+        if (s.identity === 'verified' && /^(?:请|麻烦|帮我|给我|我要|我想|请帮我|我要投诉[，,。 ]*)*(?:转(?:接)?人工(?:客服|专员)?|找人工客服|人工客服跟进)(?:处理|跟进|一下)?[。！!]?$/u.test(e.text.trim())) {
+          s.handoff = {number:job(s,'human'), turn:e.turn, text:e.text};
+          s.confirmation = null;
+        }
         const prompt = s.confirmationPrompt;
-        if (s.identity === 'verified' && prompt?.connection === e.connection && prompt.turn !== e.turn && !questions(s).length &&
+        if (!s.handoff && s.identity === 'verified' && prompt?.connection === e.connection && prompt.turn !== e.turn && !questions(s).length &&
             materials.every((m) => s.points[m.id] === 'complete') &&
             /^(?:好的?|是的|嗯)?(?:这?两项)?(?:我)?(?:都)?(?:清楚了|明白了|了解了|听明白了)(?:没有(?:其他)?问题了?)?(?:谢谢)?$/.test(normalize(e.text))) {
           s.confirmation = { turn: e.turn, connection: e.connection, text: e.text, prompt: prompt.id };
         }
         s.confirmationPrompt = null;
         const action = callbackIntent(e.text, s.identity === 'verified', s.callbackPolicy ?? 'callback-v1');
-        if (action === 'declined') s.callback = null;
-        if (action === 'callback' || action === 'clarify')
-          s.callback = { action, text: e.text, turn: e.turn, connection: s.connection };
+        s.contactTurn = action === 'none' ? null : {action,turn:e.turn,connection:e.connection};
+        if (action === 'declined') {
+          db.prepare("UPDATE review_jobs SET status='withdrawn' WHERE case_id=? AND revision=? AND kind='merchant_callback' AND status='pending'")
+            .run(s.caseId ?? caseId,s.revision ?? revision);
+          s.callback = null;
+        }
+        if (action === 'callback' || action === 'clarify') {
+          const number = action === 'callback' ? job(s,'merchant_callback') : null;
+          if (number) db.prepare("UPDATE review_jobs SET status='pending' WHERE case_id=? AND revision=? AND kind='merchant_callback' AND status='withdrawn'")
+            .run(s.caseId,s.revision);
+          s.callback = {action,number,text:e.text,turn:e.turn,connection:s.connection};
+        }
       }
     } else if (e.type === 'tool') {
       let result;
+      const words = currentSpeech()?.text ?? '';
+      const auto = e.name === 'resolve_local_turn' && s.offline;
+      const name = auto ? (s.identity !== 'verified' ? 'verify_merchant' :
+        s.confirmation || s.handoff || s.contactTurn?.turn === e.turn || /^(?:请|麻烦)?(?:继续|接着|还有什么没说完|还有哪些)(?:讲|说|说完|说明)?[。？]?$/u.test(words)
+          ? 'get_call_progress' : 'lookup_review_guidance') : e.name;
       if (e.turn !== s.turn || !s.turn) result = { ok: false, say: '请听取商家最新的回答。' };
-      else if (e.name === 'verify_merchant') {
+      else if (name === 'verify_merchant') {
         const words = normalize(currentSpeech()?.text || '');
         const previousMerchant = s.turns.findLast((t) =>
           t.connection === s.connection && t.speaker === '商家' && t.item !== e.turn);
-        if (s.identity === 'verified' || matches(words) || confirmsSpelling(words, previousMerchant)) {
+        const verification = identify(a, words, previousMerchant?.text);
+        if (s.identity === 'verified' || verification === 'verified') {
           s.identity = 'verified';
           result = progress(s);
-        } else if (soundsLikeMerchant(words)) {
-          result = { ok: false, say: '这个名称有同音的写法。请分别用一个词说明商家名称的前两个字怎么写。' };
-        } else result = { ok: false, say: '暂时无法核实，请只说出完整测试商家名称。' };
-      } else if (s.identity !== 'verified' || e.name === 'get_call_progress') result = progress(s);
-      else if (e.name === 'lookup_review_guidance') {
+        } else if (verification === 'clarify') {
+          result = { ok: false, say: fixedSpeech.spelling };
+        } else result = { ok: false, say: fixedSpeech.retryIdentity };
+      } else if (s.identity === 'verified' && !s.handoff && s.contactTurn?.turn === e.turn &&
+          s.contactTurn.connection === e.connection && fixedSpeech[s.contactTurn.action]) {
+        result={ok:true,say:fixedSpeech[s.contactTurn.action]};
+      } else if (s.identity !== 'verified' || s.handoff || name === 'get_call_progress') result = progress(s);
+      else if (name === 'lookup_review_guidance') {
         const question = currentSpeech()?.text || '';
-        const topic = guidanceTopic(question, e.topic);
+        const unrelated = /授权书|盖章页|授权链路/u.test(question) &&
+          !a.materials.some(p => /授权书|盖章页|授权链路/u.test(p.requirement));
+        const topic = unrelated ? null : guidanceTopic(question, auto ? 'page' : e.topic, s.guidancePolicy ?? 'grounded-v1');
         const faq = topic ? null : lookupFaq(catalog, question);
-        const answer = guidanceAnswers[topic] ?? faq?.answer;
+        const entry = a.answers[topic] ?? commonAnswers[topic];
+        const answer = entry?.say ?? faq?.answer;
         result = {
           ok: Boolean(answer),
           topic: faq ? 'faq' : topic,
-          say: answer || '现有资料还不能确定这个问题的答复，我先记为待核实。您可以再具体说一下吗？',
-          relatedPoint: topic === 'page' ? 'seal' : topic === 'chain' ? 'chain' : null,
+          say: answer || fixedSpeech.unknown,
+          relatedPoint: entry?.point ?? null,
           source: faq?.answer ? '赛方业务包 / ' + faq.citation.sheet + ' / 行 ' + faq.citation.row
-            : answer ? '合成资审单 POP-DEMO-018 / v1' : null,
+            : answer ? sourceLabel(a) : null,
           ...(faq && { citation: faq.citation }),
           questionTurn: e.turn,
         };
@@ -259,7 +323,8 @@ export function openStore(file, { catalog = null, readOnly = false, turnMode = '
         s.confirmation = null;
         s.confirmationPrompt = null;
       } else throw fail(400, '未知业务工具。');
-      s.tools.push({ name: e.name, ok: result.ok, turn: e.turn });
+      if(auto) result.executedTool=name;
+      s.tools.push({ name, ok: result.ok, turn: e.turn });
       return result;
     } else if (e.type === 'playback') {
       const expected = progress(s);
@@ -352,7 +417,20 @@ export function openStore(file, { catalog = null, readOnly = false, turnMode = '
           }
           db.prepare('INSERT INTO review_audio VALUES(?,?,?)').run(id, clipKey(e), pcm);
         }
+        if (e.type === 'playback' && e.point && !applicationOf(s).materials.some(m => m.id === e.point))
+          throw fail(400,'材料不属于当前案卷。');
         result = apply(s, e, audibleMs);
+        if (s.localSpeech && promptDir) for (const plan of [result, result.next, result.opening]) {
+          if (plan?.say) {
+            const key = promptAudio(s,promptDir,audioKey(plan.say));
+            if (key) plan.audio = key;
+          }
+        }
+        if (s.handling?.outcome === 'in_progress' && ['ended','wrong_number'].includes(s.status)) {
+          s.handling.outcome = s.status === 'wrong_number' ? 'wrong_number' : s.identity === 'verified' ? 'contacted' : 'unverified';
+          db.prepare('UPDATE review_jobs SET status=? WHERE case_id=? AND revision=? AND kind=? AND owner=?')
+            .run(s.handling.outcome,s.caseId,s.revision,s.handling.action,id);
+        }
         if (e.type === 'playback') Object.assign(result, { firstSoundMs, lastSoundMs });
         db.prepare('UPDATE review_calls SET state=? WHERE id=?').run(JSON.stringify(s), id);
         db.prepare('INSERT INTO review_events(call,connection,event,body,result) VALUES(?,?,?,?,?)').run(
@@ -382,9 +460,9 @@ export function openStore(file, { catalog = null, readOnly = false, turnMode = '
       const e = JSON.parse(row.body), result = JSON.parse(row.result);
       if (e.type === 'playback') return { ...e, clip: clipKey(e), audibleMs: playback.get(clipKey(e)) ?? 0,
         firstSoundMs: result.firstSoundMs, lastSoundMs: result.lastSoundMs };
-      return { ...e, result };
+      return { ...e, ...(result?.executedTool && {name:result.executedTool}), result };
     });
-    return evidenceReport(id, s, events, (conn) => stereo(id, conn));
+    return evidenceReport(id, s, events, (conn) => stereo(id, conn), applicationOf(state));
   }
   // The offline reader has no HTTP routes and opens the database read-only.
   if (readOnly) return {
@@ -398,7 +476,17 @@ export function openStore(file, { catalog = null, readOnly = false, turnMode = '
     stereo, close: () => db.close(),
   };
   return {
-    create, event,
+    create, cards, dispatch, event,
+    prompt(id,token,key) {
+      const result = promptAudio(load(id,token),promptDir,key,true);
+      if (!result) throw fail(404,'当前案卷无此段获准播报的语音。');
+      return result;
+    },
+    screen(id,token,connection,text) {
+      const s = load(id,token);
+      if (s.connection !== connection || s.status !== 'open') return '连接或案卷已失效';
+      return !text?.trim() ? '缺少完整转写' : speechRisks(text,s.identity === 'verified',applicationOf(s)).map(([,label])=>label).join('、');
+    },
     read: (id, token) => snapshot(load(id, token)),
     recording(id, token, connection) {
       load(id, token);

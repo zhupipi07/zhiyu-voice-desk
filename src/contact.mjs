@@ -1,11 +1,14 @@
 // Match an explicit statement about the recipient, preserving clause boundaries.
-export function deniesIdentity(words) {
+export function deniesIdentity(words, merchant = '青禾商贸') {
   const statements = words.normalize('NFKC').replace(/\s/g, '').split(/[，,。.!！；;]/u);
-  return statements.some((s) =>
+  return statements.some((clause) => {
+    const s = clause.replaceAll(merchant, '目标商家');
+    return (
     /^(?:(?:你们?|您)(?:电话)?|这个电话)?(?:打错|拨错|找错)(?:了|号码了?|电话了?|人了?)?$/.test(s) ||
-    /^(?:(?:我|我们|这|这里|这儿|这边)(?:公司)?)?(?:不是|并非|不属于)(?:本人|青禾商贸(?:有限(?:责任)?公司)?(?:的(?:人|员工|负责人)?)?)$/.test(s) ||
+    /^(?:(?:我|我们|这|这里|这儿|这边)(?:公司)?)?(?:不是|并非|不属于)(?:本人|目标商家(?:有限(?:责任)?公司)?(?:的(?:人|员工|负责人)?)?)$/.test(s) ||
     /^(?:这|这里|这家)?不是我们公司$/.test(s)
-  );
+    );
+  });
 }
 
 // This decision only creates or changes a local follow-up for a verified merchant.

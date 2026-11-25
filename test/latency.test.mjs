@@ -7,7 +7,7 @@ test('latency uses same-recording annotations and reports unpaired and overlappi
     confirmedSpeechEndMs: end, firstIntelligibleMs: first });
   const report = { call: 'call', connections: [
     { connection: 'first', recording: { originMs: 1000, samples: 32000 }, opening: [{}], turns: [
-      row('a', 1100, 1400), row('b', 2000, 3300, [{}]), row('c', 4000, 3950),
+      row('a', 1100.123, 1400.123), row('b', 2000, 3300, [{}]), row('c', 4000, 3950),
       { ...row('d', 4200, null), replies: [], micEndCandidateMs: 4200 },
     ] },
     { connection: 'reconnect', recording: { originMs: 50, samples: 1600 }, opening: [], turns: [
@@ -20,6 +20,9 @@ test('latency uses same-recording annotations and reports unpaired and overlappi
   assert.equal(result.openingReplies, 1);
   assert.equal(result.withTool.p50Ms, 1300);
   assert.equal(result.withoutTool.p50Ms, 0);
+  report.connections[0].turns[0].firstContentWordMs=1650.123;
+  assert.equal(evaluateLatency([report]).content.p50Ms,550);
+  assert.equal(evaluateLatency([report]).overall.p50Ms,300);
   assert.equal(evaluateLatency([]).overall.p50Ms, null);
   assert.throws(() => evaluateLatency([report, report]), /重复/);
   report.connections[1].turns[0].firstIntelligibleMs = 1400;

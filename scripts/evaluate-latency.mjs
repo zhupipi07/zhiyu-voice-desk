@@ -24,7 +24,8 @@ export function evaluateLatency(reports) {
       openingReplies += conn.opening.length;
       for (const turn of conn.turns) {
         const end = turn.confirmedSpeechEndMs, first = turn.firstIntelligibleMs;
-        for (const time of [end, first]) {
+        const content = turn.firstContentWordMs;
+        for (const time of [end, first, content]) {
           if (time == null) continue;
           const rec = conn.recording;
           if (!Number.isFinite(time) || !Number.isFinite(rec?.originMs) ||
@@ -32,15 +33,21 @@ export function evaluateLatency(reports) {
               time < rec.originMs || time > rec.originMs + rec.samples / 8)
             throw new Error(`标注超出本次连接的 8 kHz 录音范围：${report.call} / ${conn.connection} / ${turn.turn}`);
         }
-        const latency = end == null || first == null ? null : first - end;
+        // Audio marks are on an 8 kHz clock. Keep sub-millisecond positions while
+        // removing floating-point noise when subtracting a shared clock origin.
+        const latency = end == null || first == null ? null : Number((first - end).toFixed(6));
+        const contentLatency = end == null || content == null ? null : Number((content - end).toFixed(6));
         rows.push({ call: report.call, connection: conn.connection, turn: turn.turn,
           withTool: turn.tools.length > 0, hasTimedReply: turn.replies.some((r) => Number.isFinite(r.firstSoundMs)),
           status: latency == null ? 'unpaired' : latency < 0 ? 'overlap' : 'measured',
-          confirmedSpeechEndMs: end ?? null, firstIntelligibleMs: first ?? null, firstWordLatencyMs: latency });
+          confirmedSpeechEndMs: end ?? null, firstIntelligibleMs: first ?? null, firstWordLatencyMs: latency,
+          firstContentWordMs:content ?? null, contentWordLatencyMs:contentLatency });
       }
     }
   }
   return { calls: calls.size, openingReplies, overall: outcomes(rows),
+    content: outcomes(rows.map(r => ({...r,firstWordLatencyMs:r.contentWordLatencyMs,
+      status:r.contentWordLatencyMs == null ? 'unpaired' : r.contentWordLatencyMs < 0 ? 'overlap' : 'measured'}))),
     withTool: outcomes(rows.filter((r) => r.withTool)), withoutTool: outcomes(rows.filter((r) => !r.withTool)), rows };
 }
 

@@ -3,11 +3,13 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { openStore, MODEL, fail, partialResultExample } from './src/review.mjs';
+import { startRecognizer } from './src/local-asr.mjs';
+import { loadApplications } from './src/applications.mjs';
 import { loadKnowledge } from './src/knowledge.mjs';
 import { gatewayAnswer } from './src/media-gateway.mjs';
 
 const files = new Map(
-  ['index.html', 'app.mjs', 'result.mjs', 'realtime.mjs', 'audio.mjs', 'capture.mjs', 'style.css'].map((name) => [
+  ['index.html', 'app.mjs', 'result.mjs', 'realtime.mjs', 'audio.mjs', 'capture.mjs', 'style.css', 'listening.wav'].map((name) => [
     '/' + name,
     new URL('./public/' + name, import.meta.url),
   ])
@@ -16,8 +18,9 @@ const types = {
   html: 'text/html; charset=utf-8',
   mjs: 'text/javascript; charset=utf-8',
   css: 'text/css; charset=utf-8',
+  wav: 'audio/wav',
 };
-const tools = new Set(['verify_merchant', 'get_call_progress', 'lookup_review_guidance']);
+const tools = new Set(['verify_merchant', 'get_call_progress', 'lookup_review_guidance','resolve_local_turn']);
 function string(value, max) {
   return typeof value === 'string' && value.length > 0 && value.length <= max;
 }
@@ -39,11 +42,11 @@ function validate(e) {
       ![e.inputTokens, e.outputTokens].every((n) => Number.isSafeInteger(n) && n >= 0)))
     throw fail(400, '无效的模型用量记录。');
   if (e.type === 'setup' && (!['connected', 'client_channel_open', 'server_channel_open', 'session_created',
-    'session_updated', 'retry', 'failed'].includes(e.name) || ![1, 2].includes(e.attempt) || !time(e.atMs)))
+    'session_updated', 'retry', 'upstream_retry', 'failed'].includes(e.name) || ![1, 2].includes(e.attempt) || !time(e.atMs)))
     throw fail(400, '无效的建连记录。');
   if ([e.startMs, e.cutAtMs, e.atMs].some((v) => v != null && !time(v)))
     throw fail(400, '无效的音频时间点。');
-  if (e.type === 'marker' && (!['speech_started', 'speech_stopped', 'committed'].includes(e.name) || !time(e.atMs)))
+  if (e.type === 'marker' && (!['speech_started', 'speech_stopped', 'committed', 'listener_cue'].includes(e.name) || !time(e.atMs)))
     throw fail(400, '无效的断句记录。');
   if (e.type === 'recording' && (!Number.isSafeInteger(e.offset) || e.offset < 0 || !time(e.originMs) ||
       typeof e.final !== 'boolean' || typeof e.pcm !== 'string' || e.pcm.length > 90000))
@@ -56,7 +59,7 @@ function validate(e) {
       e.pcm.length > 1400000 ||
       typeof e.drained !== 'boolean' ||
       typeof e.interrupted !== 'boolean' ||
-      (e.point != null && !['chain', 'seal'].includes(e.point)))
+      (e.point != null && (typeof e.point !== 'string' || !/^[\w-]{1,64}$/u.test(e.point))))
   )
     throw fail(400, '播放记录无效。');
 }
@@ -86,10 +89,10 @@ export function wav(pcm, channels = 1) {
   h.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([h, pcm]);
 }
-export function createApp({ store, key, workspace, upstream = fetch, transport = 'direct' }) {
-  if (!['direct', 'gateway'].includes(transport)) throw new Error('未知语音接入方式。');
+export function createApp({ store, key, workspace, upstream = fetch, transport = 'direct', strictAudio = false, batchMs = 100, recognizer = null }) {
+  if (!['direct', 'gateway','local'].includes(transport)) throw new Error('未知语音接入方式。');
   const gateways = new Map();
-  const ready = Boolean(key && workspace && /^[a-z0-9][a-z0-9-]*$/i.test(workspace));
+  const ready = transport === 'local' ? Boolean(recognizer) : Boolean(key && workspace && /^[a-z0-9][a-z0-9-]*$/i.test(workspace));
   const app = http.createServer(async (req, res) => {
     const reply = (status, value, type = 'application/json; charset=utf-8') => {
       res.writeHead(status, {
@@ -112,15 +115,27 @@ export function createApp({ store, key, workspace, upstream = fetch, transport =
         const file = files.get(path === '/' ? '/index.html' : path);
         return reply(200, readFileSync(file), types[file.pathname.split('.').at(-1)]);
       }
-      if (path === '/api/status' && method === 'GET') return reply(200, { model: MODEL, ready, transport });
+      if (path === '/api/status' && method === 'GET') return reply(200, { model: transport === 'local' ? 'Paraformer 中文离线识别' : MODEL, ready, transport, strictAudio:transport === 'gateway' && strictAudio, batchMs });
       if (path === '/api/examples/partial-result' && method === 'GET')
         return reply(200, partialResultExample());
-      if (path === '/api/calls' && method === 'POST') return reply(201, store.create());
-      const match = path.match(/^\/api\/calls\/([a-f0-9-]{36})(?:\/(events|sdp|clips|evidence|recordings)(?:\/([\w.-]+))?)?$/);
+      if (path === '/api/cases' && method === 'GET') return reply(200, store.cards());
+      if (path === '/api/calls' && method === 'POST') {
+        const raw = await body(req,1024);
+        let selected;
+        if (raw) {
+          try { selected = JSON.parse(raw).caseId; } catch { throw fail(400,'案卷参数无效。'); }
+          if (!string(selected,64)) throw fail(400,'请指定有效案卷编号。');
+        }
+        return reply(201, store.create(selected));
+      }
+      const match = path.match(/^\/api\/calls\/([a-f0-9-]{36})(?:\/(events|sdp|clips|evidence|recordings|dispatch|prompts)(?:\/([\w.-]+))?)?$/);
       if (!match) throw fail(404, '找不到该地址。');
       const [, id, route, clipId] = match;
       const token = (req.headers.authorization || '').replace(/^Bearer /, '');
       const s = store.read(id, token);
+      if (method === 'POST' && route === 'dispatch' && !clipId)
+        return reply(200,store.dispatch(id,token,await body(req,32)));
+      if (method === 'GET' && route === 'prompts' && clipId) return reply(200,store.prompt(id,token,clipId),'audio/wav');
       if (method === 'GET' && !route) return reply(200, s);
       if (method === 'GET' && route === 'evidence' && !clipId)
         return reply(200, store.report(id, token));
@@ -137,7 +152,7 @@ export function createApp({ store, key, workspace, upstream = fetch, transport =
           throw fail(400, 'JSON 格式不正确。');
         }
         validate(e);
-        if (e.type === 'connect') e.transport = transport;
+        if (e.type === 'connect') Object.assign(e,{transport, listenerCue:process.env.REVIEW_LISTENER_CUE === '1', strictAudio:transport === 'gateway' && strictAudio, batchMs:transport === 'gateway' ? batchMs : null});
         const data = store.event(id, token, e);
         if (data.snapshot.status !== 'open' || (e.type === 'connect' && s.connection !== data.snapshot.connection))
           gateways.get(id)?.abort();
@@ -149,7 +164,7 @@ export function createApp({ store, key, workspace, upstream = fetch, transport =
           throw fail(409, '当前连接已失效。');
         const offer = await body(req, 100000);
         if (!offer.startsWith('v=0') || !offer.includes('m=audio')) throw fail(400, '缺少音频连接描述。');
-        if (transport === 'gateway') {
+        if (transport !== 'direct') {
           const current = store.read(id, token);
           if (current.connection !== s.connection || current.status !== 'open') throw fail(409, '当前连接已失效。');
           gateways.get(id)?.abort();
@@ -157,7 +172,9 @@ export function createApp({ store, key, workspace, upstream = fetch, transport =
           gateways.set(id, ctrl);
           ctrl.signal.addEventListener('abort', () => gateways.delete(id), { once: true });
           try {
-            const answer = await gatewayAnswer(offer, { key, workspace, model: MODEL, signal: ctrl.signal,
+            const answer = await gatewayAnswer(offer, { key, workspace, model: MODEL, signal: ctrl.signal, recognizer,
+              batchMs, ...(strictAudio && {screen:text => store.screen(id,token,s.connection,text),
+                onBlocked:(response,text,reason) => store.event(id,token,{id:'block-' + response,type:'blocked',connection:s.connection,text,reason})}),
               onClose: () => ctrl.abort() });
             return reply(200, answer, 'application/sdp');
           } catch (err) { ctrl.abort(); throw err; }
@@ -193,14 +210,19 @@ export function createApp({ store, key, workspace, upstream = fetch, transport =
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   const dir = fileURLToPath(new URL('./data/', import.meta.url));
   mkdirSync(dir, { recursive: true });
-  const store = openStore(resolve(dir, 'review.sqlite'), { catalog: loadKnowledge(),
-    turnMode: process.env.REVIEW_TURN_MODE, policy: process.env.CALLBACK_POLICY });
+  const transport = process.argv.includes('--local') ? 'local' : process.env.REVIEW_TRANSPORT || (process.argv.includes('--direct') ? 'direct' : 'gateway');
+  const recognizer = transport === 'local' ? startRecognizer(process.env.REVIEW_ASR_PYTHON,process.env.REVIEW_ASR_MODEL) : null;
+  if (recognizer) {console.log('正在预热本地中文识别模型…');await recognizer.ready;}
+  const store = openStore(resolve(dir, 'review.sqlite'), { promptDir:process.env.REVIEW_LOCAL_SPEECH === '0' ? null : resolve(dir,'prompts'), catalog: loadKnowledge(), applications:loadApplications(process.env.REVIEW_CASES_FILE),
+    turnMode: transport === 'local' ? 'local_vad' : process.env.REVIEW_TURN_MODE || (transport === 'gateway' ? 'server_vad_750' : 'smart_turn_v2'), policy: process.env.CALLBACK_POLICY, guidancePolicy:process.env.GUIDANCE_POLICY });
   const app = createApp({
     store,
     key: process.env.DASHSCOPE_API_KEY?.trim(),
     workspace: process.env.DASHSCOPE_WORKSPACE_ID?.trim(),
-    transport: process.env.REVIEW_TRANSPORT || (process.argv.includes('--gateway') ? 'gateway' : 'direct'),
+    strictAudio:process.env.REVIEW_STRICT_AUDIO !== '0', batchMs:Number(process.env.REVIEW_BATCH_MS || 100),
+    transport,recognizer,
   });
+  app.once('close',()=>recognizer?.close());
   const port = Number(process.env.PORT || 8765);
   app.listen(port, '127.0.0.1', () =>
     console.log(`资审通话测试台  http://127.0.0.1:${app.address().port}`)

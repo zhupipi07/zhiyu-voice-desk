@@ -10,7 +10,9 @@ let apiReady = false,
   busy = false,
   online = false,
   queue = Promise.resolve();
-let replay, replayUrl, startedAt;
+let replay, replayUrl, startedAt, cards = [];
+const selected = () => cards.find(c => c.caseId === $('case-select').value);
+const actions = {call:'电话告知', written:'写入书面意见', retry:'登记二次外呼', callback:'登记回电', review:'待复核'};
 const labels = {
   pending: '待讲',
   partial: '已播部分',
@@ -39,10 +41,14 @@ setInterval(() => {
     .join(':');
 }, 500);
 function buttons() {
-  $('start').disabled = !apiReady || busy || Boolean(voice);
+  const card = selected(), offline = card && ['written','retry','callback'].includes(card.routing.action) && state?.status !== 'open';
+  $('case-select').disabled = busy || Boolean(voice) || state?.status === 'open';
+  $('start').disabled = (!apiReady && !offline) || !card || card.routing.action === 'review' || busy || Boolean(voice);
+  $('retry-dial').disabled = !apiReady || busy;
+  $('retry-missed').disabled = busy;
   $('result-start').disabled = $('start').disabled;
   $('record-evidence').disabled = busy || Boolean(voice);
-  $('start').textContent = state?.status === 'open' ? '继续上次通话' : '开始模拟通话';
+  $('start').textContent = state?.status === 'open' ? '继续上次通话' : offline ? actions[card.routing.action] : '开始模拟通话';
   $('end').disabled = busy || (!voice && state?.status !== 'open');
   $('wave').classList.toggle('live', online);
 }
@@ -206,6 +212,43 @@ async function stop(endCall, message = '') {
     render(state);
   }
 }
+async function createTicket(signal) {
+  const response = await (await request('/api/calls', {method:'POST', signal, headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({caseId:selected().caseId})})).json();
+  ticket = {id:response.id, token:response.token};
+  sessionStorage.setItem('review-ticket',JSON.stringify(ticket));
+  render(response.snapshot);
+}
+function showCard() {
+  const c = selected();
+  if (!c) return;
+  const src = c.routing.source;
+  $('case-route').textContent = [actions[c.routing.action], c.routing.reason, src?.row ? src.sheet + ' 第 ' + src.row + ' 行' : '合成案卷规则'].join(' · ');
+  $('card-merchant').textContent = c.merchant;
+  $('card-name').textContent = '核身时回答“我是' + c.merchant + '”。' + (c.spelling ? '如需澄清，可以说“' + c.spelling + '”。' : '');
+  $('card-question').textContent = c.caseId === 'POP-DEMO-018' ? '听到第二项时插话问“具体要补哪一页？”' : '告知过程中插话问“要交到哪里？”';
+  const written = c.routing.action === 'written';
+  $('card-role').hidden = written;
+  $('card-steps').hidden = written;
+  $('card-tip').textContent = written ? '执行书面告知后，可核对本单整改意见和回执。' : '也可以测试错号、转人工或回电要求。';
+  buttons();
+}
+$('case-select').onchange = () => {
+  if (voice || busy || state?.status === 'open') return;
+  stopReplay(); ticket = null; connection = null; sessionStorage.removeItem('review-ticket');
+  setNotice(''); render(null); showCard(); uiStatus('等待办理');
+};
+$('retry-missed').onclick = async () => {
+  busy = true; buttons();
+  try {render(await (await request(route('/dispatch'),{method:'POST',body:'missed'})).json());}
+  catch (err) {setNotice(err.message);} finally {busy = false; buttons();}
+};
+$('retry-dial').onclick = async () => {
+  busy = true; buttons();
+  try {render(await (await request(route('/dispatch'),{method:'POST',body:'dial'})).json());}
+  catch (err) {setNotice(err.message); return;} finally {busy = false; buttons();}
+  $('start').click();
+};
 $('start').onclick = async () => {
   busy = true;
   startedAt = null;
@@ -213,8 +256,14 @@ $('start').onclick = async () => {
   stopReplay();
   setNotice('');
   buttons();
+  if (state?.status !== 'open' && ['written','retry','callback'].includes(selected().routing.action)) {
+    try {await createTicket();} catch (err) {setNotice(err.message);}
+    finally {busy = false; buttons();}
+    return;
+  }
   const transport = new VoiceCall({
     recordEvidence: $('record-evidence').checked,
+    fetchPrompt:async (key,signal) => (await request(route('/prompts/' + encodeURIComponent(key)),{signal})).arrayBuffer(),
     event,
     current: () => state,
     status: (message) => {
@@ -241,10 +290,7 @@ $('start').onclick = async () => {
     // Start audio in the click handler while the browser still grants user activation.
     await transport.start(async () => {
       if (!ticket || state?.status !== 'open') {
-        const response = await (await request('/api/calls', { method: 'POST', signal: transport.abort.signal })).json();
-        ticket = { id: response.id, token: response.token };
-        render(response.snapshot);
-        sessionStorage.setItem('review-ticket', JSON.stringify(ticket));
+        await createTicket(transport.abort.signal);
       }
       connection = null;
       const { result, snapshot } = await event({ type: 'connect', id: crypto.randomUUID() });
@@ -273,8 +319,15 @@ async function init() {
       return;
     }
     const health = await (await request('/api/status')).json();
+    cards = await (await request('/api/cases')).json();
+    $('case-select').replaceChildren(...cards.map(c => new Option(c.caseId + ' · ' + c.merchant + ' · ' + c.categories.at(-1),c.caseId)));
+    $('case-chooser').hidden = false;
     apiReady = health.ready;
-    if (health.transport === 'gateway') $('model').textContent = 'Qwen-Audio 3.1 Flash · 本地 WebRTC 网关';
+    if (health.transport === 'local') {
+      $('model').textContent = '本机 Paraformer · 核准话术播报';
+      $('audio-note').textContent = '语音识别、业务处理和播报均在本机运行。';
+    }
+    if (health.transport === 'gateway') $('model').textContent = 'Qwen-Audio 3.1 Flash · WebRTC 网关' + (health.strictAudio ? ' · 云端候选话术播前校验' : '');
     const saved = sessionStorage.getItem('review-ticket');
     if (saved) {
       try {
@@ -286,6 +339,8 @@ async function init() {
         sessionStorage.removeItem('review-ticket');
       }
     }
+    if (state && cards.some(c => c.caseId === state.caseId)) $('case-select').value = state.caseId;
+    showCard();
     uiStatus(state?.status === 'open' ? '可以恢复通话' : '等待接通');
     if (!apiReady) setNotice('请在服务端 .env 配置北京百炼密钥和业务空间，然后重新启动。');
   } catch (err) {

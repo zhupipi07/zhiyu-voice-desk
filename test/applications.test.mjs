@@ -1,0 +1,106 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { openStore } from '../src/review.mjs';
+import { demoApplications, pointScript } from '../src/applications.mjs';
+import { audioKey, fixedSpeech } from '../src/prompt-audio.mjs';
+import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+function session(t, options={}, caseId='POP-DEMO-027', transport='gateway') {
+  const store=openStore(':memory:',options);
+  t.after(()=>store.close());
+  const call=store.create(caseId);
+  const send=(type,fields={})=>store.event(call.id,call.token,{type,id:randomUUID(),connection,...fields});
+  let connection;
+  connection=send('connect',{transport}).result.connection;
+  const say=text=>{const turn=randomUUID();send('turn',{turn});send('transcript',{turn,text});return turn;};
+  const tool=(turn,name,topic)=>send('tool',{turn,name,topic}).result;
+  return {store,call,send,say,tool,connection};
+}
+test('a newly supplied application uses its own merchant, requirements, evidence scope and receipt',t=>{
+  const added={...demoApplications[1],caseId:'JUDGE-123',merchant:'远帆测试公司',revision:7};
+  const {store,call,say,tool,send}=session(t,{applications:[added]},added.caseId);
+  assert.equal(tool(say('我是青禾商贸'),'verify_merchant').ok,false);
+  const first=tool(say('我是远帆测试公司'),'verify_merchant');
+  assert.equal(first.point,'shop_name');
+  assert.equal(first.source,'合成资审单 JUDGE-123 / v7');
+  assert.equal(tool(say('授权书传到哪里？'),'lookup_review_guidance','channel').ok,false);
+  assert.equal(tool(say('请教您一下，从哪里提交？'),'lookup_review_guidance','channel').ok,true);
+  assert.throws(()=>send('playback',{point:'seal',pcm:'',drained:true,text:'第二项'}),/不属于/);
+  assert.match(send('end').snapshot.receipt.opinion,/旗舰店/);
+  assert.equal(store.report(call.id,call.token).caseId,added.caseId);
+});
+test('written and repeat-missed routes persist one receipt and never start a microphone session',t=>{
+  const store=openStore(':memory:');t.after(()=>store.close());
+  const written=store.create('POP-DEMO-035');
+  assert.equal(written.snapshot.status,'ended');
+  assert.ok(written.snapshot.receipt);
+  assert.equal(store.report(written.id,written.token).connections.length,0);
+  assert.throws(()=>store.event(written.id,written.token,{type:'connect',id:'c'}),/已结束/);
+  const a=store.create('POP-DEMO-046'),b=store.create('POP-DEMO-046');
+  assert.equal(a.snapshot.handling.job,b.snapshot.handling.job);
+  const r=store.dispatch(a.id,a.token,'missed');
+  assert.deepEqual(r.receipt,store.dispatch(a.id,a.token,'missed').receipt);
+  assert.throws(()=>store.dispatch(b.id,b.token,'dial'),/已在其他/);
+  assert.deepEqual(store.create('POP-DEMO-046').snapshot.receipt,r.receipt);
+  assert.equal(store.report(a.id,a.token).quality.closedLoop,false);
+});
+test('a retry can be claimed once and completed on the same case', t=>{
+  const store=openStore(':memory:');t.after(()=>store.close());
+  const a=store.create('POP-DEMO-046'),b=store.create('POP-DEMO-046');
+  assert.equal(store.dispatch(a.id,a.token,'dial').status,'open');
+  assert.equal(store.dispatch(a.id,a.token,'dial').status,'open');
+  assert.throws(()=>store.dispatch(b.id,b.token,'missed'),/其他/);
+  const c=store.event(a.id,a.token,{type:'connect',id:'c'}).result.connection;
+  const final=store.event(a.id,a.token,{type:'end',connection:c,id:'e'}).snapshot;
+  assert.equal(final.handling.outcome,'unverified');
+  assert.equal(store.create('POP-DEMO-046').snapshot.handling.outcome,'unverified');
+});
+test('new merchant privacy, transfer and wrong-number handling stay bound to the selected case',t=>{
+  const {store,call,say,tool,send,connection}=session(t);
+  const screen=text=>store.screen(call.id,call.token,connection,text);
+  assert.match(screen('请问是海松商贸吗'),/披露/);
+  assert.equal(screen('您好，我是模拟 AI 资审专员，请您报出测试商家名称。'),'');
+  tool(say('我是海松商贸'),'verify_merchant');
+  assert.match(screen('我保证审核通过'),/承诺/);
+  assert.ok(screen('无法提前保证通过。')==='');
+  const turn=say('我要投诉，请转人工客服。');
+  assert.match(tool(turn,'get_call_progress').say,/人工/);
+  assert.ok(store.read(call.id,call.token).handoff.number);
+  say('我不是海松商贸');
+  assert.equal(store.read(call.id,call.token).status,'wrong_number');
+  assert.equal(store.read(call.id,call.token).handoff,null);
+  assert.throws(()=>send('tool',{turn,name:'get_call_progress'}),/已结束/);
+});
+test('offline recognition chooses a case tool and keeps unresolved questions on reconnect',t=>{
+  const {store,call,say,tool,send}=session(t,{turnMode:'local_vad'},'POP-DEMO-018','local');
+  assert.equal(tool(say('或是清河商贸'),'resolve_local_turn').ok,false);
+  assert.equal(tool(say('青草的青禾苗的禾'),'resolve_local_turn').executedTool,'verify_merchant');
+  const answer=tool(say('要补哪一页'),'resolve_local_turn');
+  assert.equal(answer.executedTool,'lookup_review_guidance');
+  assert.match(answer.say,/盖章页/);
+  const missing=tool(say('请问办理费用是多少'),'resolve_local_turn');
+  assert.equal(missing.ok,false);
+  assert.match(send('connect',{transport:'local'}).result.next.say,/重述|再说一遍/);
+  const report=store.report(call.id,call.token);
+  assert.ok(report.connections.some(c=>c.transport==='local' && c.turnDetection?.type==='local_vad'));
+  assert.equal(report.quality.pendingQuestions,2);
+});
+test('approved audio is scoped to the authenticated case, identity and active session',t=>{
+  const dir=mkdtempSync(join(tmpdir(),'review-phrases-'));
+  const phrase=pointScript(demoApplications[1].materials[0]),key=audioKey(phrase);
+  const file=join(dir,key+'.wav');writeFileSync(file,'test');
+  t.after(()=>{unlinkSync(file);rmdirSync(dir);});
+  const {store,call,say,tool,send}=session(t,{promptDir:dir});
+  const fetch=()=>store.prompt(call.id,call.token,key);
+  assert.throws(fetch,/无此段/);
+  assert.equal(tool(say('我是海松商贸'),'verify_merchant').audio,key);
+  assert.equal(fetch().toString(),'test');
+  assert.throws(()=>store.prompt(call.id,'other',key),/找不到/);
+  const other=store.create('POP-DEMO-018');
+  assert.throws(()=>store.prompt(other.id,other.token,key),/无此段/);
+  assert.notEqual(key,audioKey(fixedSpeech.askName));
+  send('end');assert.throws(fetch,/无此段/);
+});

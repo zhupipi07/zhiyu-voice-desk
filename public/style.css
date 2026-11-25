@@ -375,3 +375,7 @@ dd {
     font-size: 0.78rem;
   }
 }
+
+.case-chooser{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:22px 0 12px;padding:14px 18px;border:1px solid #cfdbd4;background:#fbfdfb;border-radius:12px}
+.case-chooser label{font-weight:700}.case-chooser select{font:inherit;max-width:100%;border:1px solid #90aa9a;border-radius:6px;padding:7px;background:white;color:#163c30}
+#case-route{color:#466253;font-size:.9rem}[hidden]{display:none!important}

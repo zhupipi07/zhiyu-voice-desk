@@ -38,9 +38,17 @@ function clauseTopic(clause) {
   return 'unknown';
 }
 
-export function guidanceTopic(transcript, proposed) {
+export const guidanceVersions = ['grounded-v1','grounded-v2'];
+export function guidanceTopic(transcript, proposed, version = 'grounded-v2') {
   if (!Object.hasOwn(questions, proposed)) return null;
-  const words = transcript.normalize('NFKC').replace(/\s+/gu, '')
+  if (!guidanceVersions.includes(version)) throw new Error('未知材料问答版本');
+  let text = transcript;
+  if (version === 'grounded-v2') {
+    // Drop politeness only at clause edges; preserve negations, subjects and multiple questions.
+    text = text.replace(/(^|[，,。！？?!])\s*(?:(?:我)?想(?:请教|咨询|确认)(?:您)?一下|请教(?:您)?一下|能麻烦您(?:说|讲)一下|麻烦您(?:告诉|说|讲)我)[，,\s]*/gu,'$1')
+      .replace(/(?:谢谢您?|麻烦您了)[。！!\s]*$/u,'');
+  }
+  const words = text.normalize('NFKC').replace(/\s+/gu, '')
     .replace(/^(?:我)?不是(?:在)?问[^，,。？！?!；;]+[，,](?=(?:我想问|我是想问|我是问|请问))/u, '')
     .replace(/^我是问/u, '我想问');
   const topics = new Set(words.split(/[，,。？！?!.；;]/u).map(clauseTopic).filter(Boolean));

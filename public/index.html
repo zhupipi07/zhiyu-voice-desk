@@ -14,6 +14,11 @@
       </div>
     </header>
     <main id="workspace" class="frame">
+      <div class="case-chooser" id="case-chooser" hidden>
+        <label for="case-select">评委抽一单</label>
+        <select id="case-select" aria-describedby="case-route"></select>
+        <span id="case-route"></span>
+      </div>
       <section id="result" aria-labelledby="result-title" hidden>
         <div class="result-header">
           <div>
@@ -21,6 +26,7 @@
             <h1 id="result-title" tabindex="-1">通话办理结果</h1>
             <p id="result-summary"></p>
           </div>
+          <div class="actions"><button id="retry-dial" hidden>接通二次外呼</button><button id="retry-missed" class="secondary" hidden>记录二次未接</button></div>
           <button id="result-start" class="secondary" disabled>开始新通话</button>
           <a id="example-back" class="text-link" href="/" hidden>返回通话台</a>
         </div>
@@ -53,7 +59,7 @@
       </section>
       <div class="title live-only">
         <h1>资审模拟通话</h1>
-        <span>POP 商家入驻</span>
+        <span>POP 商家资审</span>
       </div>
       <div class="grid" id="desk-grid">
         <section class="card call live-only">
@@ -71,18 +77,18 @@
             <button id="start" disabled>开始模拟通话</button
             ><button id="end" class="secondary" disabled>挂断</button>
           </div>
-          <p class="note">麦克风语音发送到百炼。模拟转写与坐席播放片段保存在本机。</p>
+          <p id="audio-note" class="note">麦克风语音发送到百炼。模拟转写与坐席播放片段保存在本机。</p>
           <label class="record-option"><input type="checkbox" id="record-evidence"> 同时保存双方语音，供本机质检回听</label>
         </section>
         <aside class="card live-only">
           <h2>测试者手卡</h2>
-          <p>你扮演 <strong>青禾商贸</strong> 的商家。接通后，等 AI 专员先开口。</p>
-          <ol>
-            <li>核身时回答“我是青禾商贸”。如果问前两个字怎么写，回答“青草的青，禾苗的禾”。</li>
-            <li>听到第二项时插话问“具体要补哪一页？”</li>
+          <p id="card-role">你扮演 <strong id="card-merchant">青禾商贸</strong> 的商家。接通后，等 AI 专员先开口。</p>
+          <ol id="card-steps">
+            <li id="card-name"></li>
+            <li id="card-question"></li>
             <li>听完答复后，可以追问“还有什么没说完？”</li>
           </ol>
-          <p class="note">另开一通说“你打错了”，可以测试错号分支。</p>
+          <p id="card-tip" class="note">另开一通说“你打错了”，可以测试错号分支。</p>
           <a class="text-link" href="/?example=partial">查看中途挂断的办理结果示例</a>
         </aside>
         <section class="card" id="transcript-card">

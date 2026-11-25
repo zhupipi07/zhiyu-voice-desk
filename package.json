@@ -11,6 +11,8 @@
     "eval:callback": "node scripts/evaluate-callback.mjs",
     "eval:latency": "node scripts/evaluate-latency.mjs",
     "eval:quality": "node scripts/evaluate-quality.mjs",
+    "eval:safety": "node scripts/evaluate-safety.mjs",
+    "eval:guidance": "node scripts/evaluate-guidance.mjs",
     "eval:rsi": "node scripts/evaluate-rsi.mjs",
     "route": "node scripts/inspect-route.mjs"
   },

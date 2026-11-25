@@ -13,7 +13,33 @@ export function voiceFrames(pcm, channels, channel, originMs) {
   return frames;
 }
 
-export function evidenceReport(call, s, events, readAudio) {
+// A delayed cloud onset can arrive after the merchant has already finished. Look for the last
+// sustained island on the isolated merchant channel, bounded by the previous turn and this endpoint.
+export function markAcousticCandidates(conn, pcm) {
+  const rec=conn.recording;
+  if(!rec?.samples)return;
+  const frames=voiceFrames(pcm,2,0,rec.originMs);
+  let previousEnd=rec.originMs;
+  for(const t of conn.turns) {
+    const start=t.markersMs.speech_started, end=t.markersMs.speech_stopped ?? t.markersMs.committed;
+    if(!Number.isFinite(end) || (Number.isFinite(start)&&end<start))continue;
+    const lower=Math.max(previousEnd,end-30000);
+    const groups=[];
+    for(const at of frames) {
+      if(at < lower || at+20>end+20)continue;
+      const prev=groups.at(-1);
+      if(!prev || at-prev.end>450)groups.push({start:at,end:at+20,count:1});
+      else {prev.end=at+20;prev.count++;}
+    }
+    const speech=groups.findLast(g=>g.count>=5 || (Number.isFinite(start) && g.start<=start && g.end>=start));
+    t.micStartCandidateMs=speech?.start??null;
+    t.micEndCandidateMs=speech?.end??null;
+    t.candidateMethod='last-sustained-mic-island-v2';
+    previousEnd=end;
+  }
+}
+
+export function evidenceReport(call, s, events, readAudio, application) {
   const connections = new Map();
   const recordings = s.recordings ?? {};
   function entry(id) {
@@ -33,8 +59,8 @@ export function evidenceReport(call, s, events, readAudio) {
   }
   for (const e of events) {
     if (e.type === 'connect' && e.result?.connection) {
-      entry(e.result.connection).turnDetection = e.result.session.turn_detection;
-      entry(e.result.connection).transport = e.transport ?? null;
+      entry(e.result.connection).turnDetection = e.result.turnMode === 'local_vad' ? {type:'local_vad',silence_duration_ms:650} : e.result.session.turn_detection;
+      Object.assign(entry(e.result.connection),{transport:e.transport ?? null, batchMs:e.batchMs ?? null, strictAudio:e.strictAudio ?? null, listenerCue:e.listenerCue ?? null});
     }
     if (!e.connection) continue;
     const conn = entry(e.connection);
@@ -45,13 +71,17 @@ export function evidenceReport(call, s, events, readAudio) {
     if (e.type === 'setup') conn.setup.push({ name: e.name, atMs: e.atMs, attempt: e.attempt });
     if (e.type === 'turn') turn(conn, e.turn);
     if (e.type === 'marker') turn(conn, e.turn).markersMs[e.name] = e.atMs;
-    if (e.type === 'transcript') turn(conn, e.turn).transcript = e.text;
+    if (e.type === 'transcript') {
+      const t = turn(conn,e.turn);
+      t.transcript = e.text;
+      t.markersMs.transcript = e.atMs ?? null;
+    }
     if (e.type === 'tool') turn(conn, e.turn).tools.push({
       id: e.id, name: e.name, atMs: e.atMs ?? null, result: e.result,
       ...(e.name === 'lookup_review_guidance' && { requestedTopic: e.topic ?? null }),
     });
     if (e.type === 'playback') {
-      const reply = { id: e.id, clip: e.clip, text: e.text, firstSoundMs: e.firstSoundMs ?? null,
+      const reply = { id: e.id, clip: e.clip, audioSource:e.audioSource ?? 'cloud', text: e.text, firstSoundMs: e.firstSoundMs ?? null,
         lastSoundMs: e.lastSoundMs ?? null, gateClosedMs: e.cutAtMs ?? null, interrupted: e.interrupted,
         drained: e.drained, audibleMs: e.audibleMs };
       (e.turn ? turn(conn, e.turn).replies : conn.opening).push(reply);
@@ -63,25 +93,10 @@ export function evidenceReport(call, s, events, readAudio) {
   for (const conn of connections.values()) {
     const rec = conn.recording;
     if (!rec?.samples) continue;
-    const mic = voiceFrames(readAudio(conn.connection), 2, 0, rec.originMs);
-    let previousEnd = rec.originMs;
-    for (const t of conn.turns) {
-      const start = t.markersMs.speech_started;
-      const end = t.markersMs.speech_stopped ?? t.markersMs.committed;
-      if (start == null || end == null || end < start) continue;
-      const lo = Math.max(previousEnd, start - 400);
-      const first = mic.findIndex((at) => at >= lo);
-      if (first >= 0 && mic[first] <= end) {
-        let last = first;
-        while (last + 1 < mic.length && mic[last + 1] <= end) last++;
-        t.micStartCandidateMs = mic[first];
-        t.micEndCandidateMs = mic[last] + 20;
-      }
-      previousEnd = end;
-    }
+    markAcousticCandidates(conn,readAudio(conn.connection));
   }
   return { call, caseId: s.caseId, revision: s.revision, receipt: s.receipt ?? null,
     clock: '毫秒。每次连接独立计时，WAV 文件位置 = (时间点 − recording.originMs) / 1000 秒。',
     annotation: '左右声道分别为商家、坐席。音量候选点与断句事件供定位。回听标注首个可辨认字后，计算它与商家停语的时间差。',
-    quality: qualityReport(s, events, [...connections.values()]), connections: [...connections.values()] };
+    quality: qualityReport(s, events, [...connections.values()], application), connections: [...connections.values()] };
 }

@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "task": "已有案卷的材料追问",
+  "scope": "团队自建转写。依据正确指主题与案卷匹配；不测真人 ASR 或实际播完。",
+  "historical": {
+    "call": "1b596e6c-5fd1-4965-8026-7c50bb47a26d",
+    "text": "要补哪一页？",
+    "proposed": "chain",
+    "expect": "page",
+    "baseline": "chain",
+    "selected": "page"
+  },
+  "development": [
+    {
+      "version": "grounded-v1",
+      "total": 28,
+      "correct": 20,
+      "citedAnswers": 8,
+      "correctAnswers": 8,
+      "unsafeAnswers": 0,
+      "errors": [
+        {
+          "text": "想咨询一下，要补哪一页？",
+          "proposed": "chain",
+          "expect": "page",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "我想请教一下，要补哪一页？",
+          "proposed": "chain",
+          "expect": "page",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "想咨询一下，从哪里上传？",
+          "proposed": "result",
+          "expect": "channel",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "我想请教一下，从哪里上传？",
+          "proposed": "result",
+          "expect": "channel",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "想咨询一下，补齐后一定能过吗？",
+          "proposed": "page",
+          "expect": "result",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "我想请教一下，补齐后一定能过吗？",
+          "proposed": "page",
+          "expect": "result",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "想咨询一下，谁给谁的授权书？",
+          "proposed": "page",
+          "expect": "chain",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "我想请教一下，谁给谁的授权书？",
+          "proposed": "page",
+          "expect": "chain",
+          "actual": null,
+          "cause": "有依据但未识别"
+        }
+      ]
+    },
+    {
+      "version": "grounded-v2",
+      "total": 28,
+      "correct": 28,
+      "citedAnswers": 16,
+      "correctAnswers": 16,
+      "unsafeAnswers": 0,
+      "errors": []
+    }
+  ],
+  "selected": "grounded-v2",
+  "holdout": {
+    "proposal": {
+      "version": "proposal",
+      "total": 12,
+      "correct": 0,
+      "citedAnswers": 12,
+      "correctAnswers": 0,
+      "unsafeAnswers": 12,
+      "errors": [
+        {
+          "text": "请教您一下，具体要补哪一页呢？",
+          "proposed": "chain",
+          "expect": "page",
+          "actual": "chain",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "我想确认一下，从哪里提交？",
+          "proposed": "page",
+          "expect": "channel",
+          "actual": "page",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "能麻烦您讲一下，谁给谁的授权书？",
+          "proposed": "result",
+          "expect": "chain",
+          "actual": "result",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "我想咨询一下，补齐后还要审核吗？",
+          "proposed": "chain",
+          "expect": "result",
+          "actual": "chain",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "请问上传到哪里？谢谢您。",
+          "proposed": "result",
+          "expect": "channel",
+          "actual": "result",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "麻烦您告诉我，发票要补哪一页？",
+          "proposed": "page",
+          "expect": null,
+          "actual": "page",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "不是问页码，我想问传到哪里？",
+          "proposed": "page",
+          "expect": "channel",
+          "actual": "page",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "我没有问具体要补哪一页。",
+          "proposed": "page",
+          "expect": null,
+          "actual": "page",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "想确认一下，补哪页，传到哪里？",
+          "proposed": "channel",
+          "expect": null,
+          "actual": "channel",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "请教您一下，公证费是多少？",
+          "proposed": "result",
+          "expect": null,
+          "actual": "result",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "授权书的具体页码是多少呢？",
+          "proposed": "chain",
+          "expect": "page",
+          "actual": "chain",
+          "cause": "答非所问或依据不适用"
+        },
+        {
+          "text": "请问，从哪个页面上传？",
+          "proposed": "page",
+          "expect": "channel",
+          "actual": "page",
+          "cause": "答非所问或依据不适用"
+        }
+      ]
+    },
+    "before": {
+      "version": "grounded-v1",
+      "total": 12,
+      "correct": 7,
+      "citedAnswers": 3,
+      "correctAnswers": 3,
+      "unsafeAnswers": 0,
+      "errors": [
+        {
+          "text": "请教您一下，具体要补哪一页呢？",
+          "proposed": "chain",
+          "expect": "page",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "我想确认一下，从哪里提交？",
+          "proposed": "page",
+          "expect": "channel",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "能麻烦您讲一下，谁给谁的授权书？",
+          "proposed": "result",
+          "expect": "chain",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "我想咨询一下，补齐后还要审核吗？",
+          "proposed": "chain",
+          "expect": "result",
+          "actual": null,
+          "cause": "有依据但未识别"
+        },
+        {
+          "text": "请问上传到哪里？谢谢您。",
+          "proposed": "result",
+          "expect": "channel",
+          "actual": null,
+          "cause": "有依据但未识别"
+        }
+      ]
+    },
+    "after": {
+      "version": "grounded-v2",
+      "total": 12,
+      "correct": 12,
+      "citedAnswers": 8,
+      "correctAnswers": 8,
+      "unsafeAnswers": 0,
+      "errors": []
+    },
+    "regressions": []
+  },
+  "decision": "通过离线回归",
+  "rollback": "grounded-v1"
+}

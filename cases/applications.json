@@ -1,0 +1,206 @@
+[
+  {
+    "caseId": "POP-DEMO-018",
+    "revision": 1,
+    "merchant": "青禾商贸",
+    "aliases": [
+      "青河商贸",
+      "清禾商贸",
+      "清河商贸"
+    ],
+    "spelling": [
+      {
+        "forms": "青清",
+        "words": [
+          "青草",
+          "青色",
+          "青春",
+          "青山",
+          "青菜"
+        ]
+      },
+      {
+        "forms": "禾河",
+        "words": [
+          "禾苗",
+          "禾本科",
+          "禾田"
+        ]
+      }
+    ],
+    "categories": [
+      "入驻",
+      "授权书-文审",
+      "授权链路不完整"
+    ],
+    "method": "电话",
+    "facts": {
+      "submissions": 1,
+      "missed": 0
+    },
+    "materials": [
+      {
+        "id": "chain",
+        "title": "授权链路",
+        "prefix": "第一项，",
+        "requirement": "请补交品牌方到经销商的授权书，补齐中间的授权关系。",
+        "terms": [
+          "品牌方",
+          "经销商",
+          "授权书"
+        ]
+      },
+      {
+        "id": "seal",
+        "title": "盖章页",
+        "prefix": "第二项，",
+        "requirement": "请补交授权书的盖章页。请确认这页能看清双方公司名称、印章和授权有效期，再上传完整页面。",
+        "terms": [
+          "盖章页",
+          "公司名称",
+          "印章",
+          "有效期",
+          "上传"
+        ]
+      }
+    ],
+    "answers": {
+      "page": {
+        "point": "seal",
+        "say": "要补的是授权书的盖章页，请找有双方印章的那一页。按内容认页，没有指定页码。"
+      },
+      "chain": {
+        "point": "chain",
+        "say": "第一项，请补交品牌方到经销商的授权书，补齐中间的授权关系。"
+      }
+    }
+  },
+  {
+    "caseId": "POP-DEMO-027",
+    "revision": 2,
+    "merchant": "海松商贸",
+    "categories": [
+      "入驻",
+      "店铺名称",
+      "店铺名称不符合规范"
+    ],
+    "method": "电话",
+    "facts": {
+      "submissions": 1,
+      "missed": 0
+    },
+    "materials": [
+      {
+        "id": "shop_name",
+        "title": "拟用店名",
+        "prefix": "本次需要更正店名。",
+        "requirement": "请在申请单更正拟用店名，去掉未经授权的旗舰店字样，再重新提交。",
+        "terms": [
+          "拟用店名",
+          "旗舰店",
+          "重新提交"
+        ]
+      }
+    ],
+    "answers": {},
+    "aliases": [
+      "海淞商贸",
+      "海松商冒",
+      "海松商帽"
+    ],
+    "spelling": [
+      {
+        "forms": "海",
+        "words": [
+          "大海",
+          "海洋"
+        ]
+      },
+      {
+        "forms": "松淞",
+        "words": [
+          "松树",
+          "松柏"
+        ]
+      }
+    ]
+  },
+  {
+    "caseId": "POP-DEMO-035",
+    "revision": 1,
+    "merchant": "山岚百货",
+    "categories": [
+      "入驻",
+      "授权书-文审",
+      "无品牌"
+    ],
+    "method": "京麦驳回",
+    "facts": {
+      "submissions": 1,
+      "missed": 0
+    },
+    "materials": [
+      {
+        "id": "brand",
+        "title": "申请品牌",
+        "prefix": "",
+        "requirement": "请在申请单补充拟经营的品牌信息，核对资料后重新提交。",
+        "terms": [
+          "品牌信息",
+          "重新提交"
+        ]
+      }
+    ],
+    "answers": {}
+  },
+  {
+    "caseId": "POP-DEMO-046",
+    "revision": 2,
+    "merchant": "星桥商贸",
+    "categories": [
+      "入驻",
+      "授权书-文审",
+      "持有人不一致"
+    ],
+    "method": "电话",
+    "facts": {
+      "submissions": 2,
+      "missed": 1
+    },
+    "materials": [
+      {
+        "id": "holder",
+        "title": "持有人信息",
+        "prefix": "请核对持有人。",
+        "requirement": "请核对申请单与授权书的持有人信息，提交能够说明两者关系的材料。",
+        "terms": [
+          "申请单",
+          "授权书",
+          "持有人",
+          "关系"
+        ]
+      }
+    ],
+    "answers": {},
+    "aliases": [
+      "星乔商贸",
+      "兴桥商贸"
+    ],
+    "spelling": [
+      {
+        "forms": "星兴",
+        "words": [
+          "星星",
+          "星空"
+        ]
+      },
+      {
+        "forms": "桥乔",
+        "words": [
+          "大桥",
+          "桥梁"
+        ]
+      }
+    ]
+  }
+]

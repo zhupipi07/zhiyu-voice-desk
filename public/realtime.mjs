@@ -8,8 +8,8 @@ const textMessage = (role, text) => ({
 
 // One instance owns one peer connection. All durable writes go through the call's event queue.
 export class VoiceCall {
-  constructor({ event, exchange, status, failure, current, recordEvidence }) {
-    Object.assign(this, { event, exchange, status, failure, current, recordEvidence });
+  constructor({ event, exchange, status, failure, current, recordEvidence, fetchPrompt }) {
+    Object.assign(this, { event, exchange, status, failure, current, recordEvidence, fetchPrompt });
     this.playback = new Playback();
     this.epoch = 0;
     this.responses = new Map();
@@ -46,7 +46,17 @@ export class VoiceCall {
     const result = await connect();
     if (this.closed) return;
     this.config = result.session;
+    this.offline = result.offline === true;
+    if (result.listenerCue) {
+      this.playback.onCueSound = (turn, atMs) => {
+        this.lastCueMs = atMs;
+        void this.event({type:'marker', id:'listener-cue-'+turn, name:'listener_cue', turn, atMs}).catch(err=>this.problem(err));
+      };
+      // Optional feedback must never delay the opening or a substantive answer.
+      void this.playback.prepareCue(this.abort.signal).catch(() => {});
+    }
     this.restored = result.next;
+    this.localOpening = result.opening;
     await this.openPeer();
   }
   traceSetup(name) {
@@ -160,6 +170,10 @@ export class VoiceCall {
     }, 5000);
   }
   request(say, plan = {}) {
+    if (this.openingRequested && plan.audio && this.fetchPrompt) {
+      this.playApproved(say,plan).catch(err=>this.problem(err));
+      return;
+    }
     this.nextPlan = plan;
     if (say) this.send(textMessage('system', say));
     if (!this.openingRequested) {
@@ -173,8 +187,32 @@ export class VoiceCall {
     }
     this.send({ type: 'response.create' });
   }
+  async playApproved(say,plan) {
+    const epoch = this.epoch, turn = this.turn;
+    let buffer;
+    try {
+      buffer = await this.playback.context.decodeAudioData(await this.fetchPrompt(plan.audio,this.abort.signal));
+    } catch {
+      if (this.offline) throw new Error('本地话术音频读取失败，请重新准备核准语音。');
+      if (!this.closed && this.epoch === epoch && !this.active) this.request(say,{...plan,audio:null});
+      return;
+    }
+    if (this.closed || this.epoch !== epoch || this.active) return;
+    this.cancelCue();
+    const r = {id:'local-' + crypto.randomUUID(),epoch,turn,plan,text:plan.say,tools:new Map(),local:true};
+    this.active = r;
+    clearTimeout(this.timer);
+    this.playback.start(r.id);
+    this.status('正在播报已核准的答复');
+    const completed = await this.playback.playLocal(buffer,r.id);
+    if (completed && !r.finished && !this.closed && this.epoch === epoch) {
+      this.send(textMessage('system','系统已播放经审核的答复：' + plan.say));
+      await this.finish(r,false,true);
+    }
+  }
   problem(err) {
     if (!this.closed && !this.failing) {
+      this.cancelCue();
       if (!this.ready) this.traceSetup('failed');
       this.failing = true;
       this.failure(err);
@@ -182,16 +220,34 @@ export class VoiceCall {
   }
   beginTurn(id) {
     if (!id || this.turns.has(id)) return;
+    this.cancelCue();
     this.epoch++;
     this.turn = id;
     this.nextPlan = null;
-    this.turns.set(id, { written: false });
+    const confirmed = Promise.withResolvers();
+    this.turns.set(id, {written:false, confirmed});
     // Cut the local audio gate immediately, before waiting for network or storage.
     if (this.active) {
       this.active.interruptedByTurn = id;
       void this.finish(this.active, true, false).catch((err) => this.problem(err));
     }
     void this.event({ type: 'turn', id: 'turn-' + id, turn: id }).catch((err) => this.problem(err));
+  }
+  cancelCue() {
+    clearTimeout(this.cueTimer);
+    this.playback.stopCue();
+  }
+  scheduleCue(id) {
+    const turn = this.turns.get(id);
+    if (!turn || turn.cueConsidered || !this.playback.cueBuffer || id !== this.turn) return;
+    turn.cueConsidered = true;
+    const state = this.current();
+    if (state.identity !== 'verified' || state.confirmation || state.handoff) return;
+    this.cueTimer = setTimeout(() => {
+      const now = this.playback.context.currentTime * 1000;
+      if (!this.closed && this.turn === id && now - (this.lastCueMs ?? -Infinity) >= 8000)
+        this.playback.playCue(id);
+    }, 180);
   }
   async handle(e, channel) {
     if (e.event_id && this.seen.has(e.event_id)) return;
@@ -212,7 +268,17 @@ export class VoiceCall {
         if (this.closed) return;
         if (this.recordEvidence) this.playback.record(this.stream, this.event, (err) => this.problem(err));
         this.waitFor('等待坐席开场', '百炼已接通，但没有返回开场回复。请点击继续上次通话。');
-        if (this.current().identity === 'verified' && this.current().pendingQuestion) {
+        if (this.offline && this.current().identity === 'verified') {
+          this.openingRequested = true;
+          if (!this.restored?.audio) throw new Error('缺少恢复进度所需的本机语音，请重新生成话术。');
+          this.request(null,this.restored);
+        } else if (this.current().identity === 'pending' && this.localOpening?.audio) {
+          this.send(textMessage('user','（系统自动接通提示）模拟电话已接通。系统将播报开场，请等待商家语音。'));
+          this.openingRequested = true;
+          this.request('请按以下话术自报身份并核身：' + this.localOpening.say,this.localOpening);
+        } else if (this.offline) {
+          throw new Error('缺少本机开场语音，请运行 scripts/prepare-speech.ps1 后重新接通。');
+        } else if (this.current().identity === 'verified' && this.current().pendingQuestion) {
           this.resumeNeeded = true;
           this.request(
             '同一通模拟电话已重连，上一条追问还没有确认答完。请先请商家重述问题，查询后再继续剩余材料。'
@@ -236,13 +302,18 @@ export class VoiceCall {
         this.status('商家正在说话');
         break;
       case 'input_audio_buffer.speech_stopped':
+        this.scheduleCue(e.item_id);
         break;
       case 'input_audio_buffer.committed':
         this.beginTurn(e.item_id);
         break;
+      case 'review.local_transcript':
       case 'conversation.item.input_audio_transcription.completed': {
         this.beginTurn(e.item_id);
-        if (!e.transcript?.trim()) return;
+        if (!e.transcript?.trim()) {
+          if(e.type === 'review.local_transcript') this.status('未听清，请再说一遍');
+          return;
+        }
         const data = await this.event({
           type: 'transcript',
           id: 'asr-' + e.item_id,
@@ -250,10 +321,25 @@ export class VoiceCall {
           atMs: this.playback.context.currentTime * 1000,
           text: e.transcript,
         });
-        this.turns.get(e.item_id).written = true;
+        const turn = this.turns.get(e.item_id);
+        turn.written = true;
+        turn.confirmed.resolve();
         if (data.snapshot.status === 'wrong_number') this.problem(new Error('已记录错号，停止告知。'));
+        else if (e.type === 'review.local_transcript' && this.turn === e.item_id && !this.closed) {
+          const response = await this.event({type:'tool',id:'local-action-'+e.item_id,turn:e.item_id,
+            name:'resolve_local_turn',atMs:this.playback.context.currentTime*1000});
+          if(this.turn !== e.item_id || this.closed)return;
+          if(!response.result.audio)throw new Error('当前答复缺少本机核准语音，已保留办理进度供跟进。');
+          this.request(null,response.result);
+        }
         return;
       }
+      case 'review.gateway_retry':
+        this.traceSetup('upstream_retry');
+        return;
+      case 'review.output_blocked':
+        this.problem(new Error('播前校验拦截了候选话术：' + e.reason + '。请人工复核。'));
+        return;
       case 'response.created': {
         clearTimeout(this.timer);
         const id = e.response.id;
@@ -282,7 +368,10 @@ export class VoiceCall {
       }
       case 'response.function_call_arguments.done': {
         const r = this.responses.get(e.response_id);
-        if (r) r.tools.set(e.call_id, e);
+        if (r && !r.finished) {
+          r.tools.set(e.call_id,e);
+          this.prepareTool(r,e);
+        }
         return;
       }
       case 'response.done': {
@@ -330,34 +419,37 @@ export class VoiceCall {
     if (e.item_id) await this.event({ type: 'marker', id: e.type + '-' + e.item_id,
       turn: e.item_id, name: e.type.split('.').pop(), atMs: this.playback.context.currentTime * 1000 });
   }
+  prepareTool(r,t) {
+    r.prepared ??= new Map();
+    if (r.prepared.has(t.call_id)) return r.prepared.get(t.call_id);
+    const task = this.lookupTool(r,t);
+    // Saving the result eagerly overlaps the cloud's response.done with local business lookup.
+    task.catch(() => {});
+    r.prepared.set(t.call_id,task);
+    return task;
+  }
+  async lookupTool(r,t) {
+    const turn = this.turns.get(r.turn);
+    if (turn && !turn.written) {
+      let timer;
+      try {
+        await Promise.race([turn.confirmed.promise,new Promise(resolve => {timer = setTimeout(resolve,2700);})]);
+      } finally {clearTimeout(timer);}
+    }
+    if (!turn?.written || this.closed || r.epoch !== this.epoch ||
+        !['verify_merchant','lookup_review_guidance','get_call_progress'].includes(t.name)) return null;
+    let args;
+    try {args = JSON.parse(t.arguments || '{}');} catch {return null;}
+    const data = await this.event({type:'tool',id:'fn-' + t.call_id,turn:r.turn,name:t.name,
+      topic:args?.topic ?? null,atMs:this.playback.context.currentTime * 1000});
+    return data.result;
+  }
   async runTools(r) {
     const live = () => !this.closed && r.epoch === this.epoch;
-    // ASR final and response.done may arrive in either order.
-    for (let n = 0; n < 45 && live() && !this.turns.get(r.turn)?.written; n++) await sleep(60);
     if (!live()) return;
     let plan = {};
     for (const t of r.tools.values()) {
-      let out;
-      if (r.turn && this.turns.get(r.turn)?.written) {
-        let args = {};
-        try {
-          args = JSON.parse(t.arguments || '{}');
-        } catch {
-          /* ask again on incomplete arguments */
-        }
-        if (['verify_merchant', 'lookup_review_guidance', 'get_call_progress'].includes(t.name)) {
-          const data = await this.event({
-            type: 'tool',
-            id: 'fn-' + t.call_id,
-            turn: r.turn,
-            name: t.name,
-            topic: args?.topic ?? null,
-            atMs: this.playback.context.currentTime * 1000,
-          });
-          out = data.result;
-        }
-      }
-      out ||= { ok: false, say: '请再说一遍，刚才没有获得完整的核验或查询信息。' };
+      const out = await this.prepareTool(r,t) || {ok:false,say:'请再说一遍，刚才没有获得完整的核验或查询信息。'};
       if (!live()) return;
       this.send({
         type: 'conversation.item.create',
@@ -388,6 +480,7 @@ export class VoiceCall {
       id: 'play-' + r.id,
       turn: r.turn ?? null,
       interruptedByTurn: r.interruptedByTurn ?? null,
+      audioSource:r.local ? 'approved_local' : 'cloud',
       startMs: clip.startMs,
       cutAtMs: clip.cutAtMs,
       text: r.text,
@@ -416,6 +509,7 @@ export class VoiceCall {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.cancelCue();
     clearTimeout(this.timer);
     clearTimeout(this.configRetry);
     clearTimeout(this.setupRetry);

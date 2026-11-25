@@ -4,6 +4,11 @@ class PlaybackTap extends AudioWorkletProcessor {
     super();
     this.reset(null);
     this.port.onmessage = ({ data }) => {
+      if ('cueTurn' in data) {
+        this.cueTurn = this.bodyHeard ? null : data.cueTurn;
+        this.cueReported = false;
+        return;
+      }
       this.flush();
       if (this.id) this.port.postMessage({ ended: this.id, atMs: currentTime * 1000 });
       this.reset(data.id);
@@ -11,6 +16,7 @@ class PlaybackTap extends AudioWorkletProcessor {
   }
   reset(id) {
     this.id = id;
+    this.bodyHeard = false;
     this.samples = [];
     this.phase = 0;
   }
@@ -23,8 +29,27 @@ class PlaybackTap extends AudioWorkletProcessor {
   process(inputs, outputs) {
     const input = inputs[0]?.[0],
       output = outputs[0]?.[0];
-    if (!input || !output || !this.id) return true;
-    output.set(input);
+    if (!output) return true;
+    const body = this.id && input;
+    if (body) {
+      output.set(input);
+      if (!this.bodyHeard && input.some(s => Math.abs(s) > 0.003)) {
+        this.bodyHeard = true;
+        this.cueTurn = null;
+      }
+    }
+    const cue = this.cueTurn && inputs[1]?.[0];
+    if (cue) {
+      for (let i = 0; i < cue.length; i++) {
+        output[i] += cue[i];
+        if (!this.cueReported && Math.abs(cue[i]) > 0.008) {
+          this.cueReported = true;
+          this.port.postMessage({cueTurn:this.cueTurn, atMs:(currentFrame+i)*1000/sampleRate});
+        }
+      }
+    }
+    // The stereo recorder hears the mix. Business playback evidence uses the body input only.
+    if (!body) return true;
     for (let i = 0; i < input.length; i++) {
       const sample = input[i];
       this.phase += 8000;

@@ -1,0 +1,56 @@
+
+> test
+> node --test
+
+✔ a newly supplied application uses its own merchant, requirements, evidence scope and receipt (11.5473ms)
+✔ written and repeat-missed routes persist one receipt and never start a microphone session (2.1441ms)
+✔ a retry can be claimed once and completed on the same case (1.1077ms)
+✔ new merchant privacy, transfer and wrong-number handling stay bound to the selected case (2.3975ms)
+✔ offline recognition chooses a case tool and keeps unresolved questions on reconnect (4.2655ms)
+✔ approved audio is scoped to the authenticated case, identity and active session (4.1605ms)
+✔ an answered question between materials resumes the next item while other follow-ups stay pending (1.0576ms)
+✔ browser completes a simulated Flash call across an interruption and plays the recorded evidence (51462.4496ms)
+✔ local endpoint preserves pre-roll and a spelling pause, ends after silence and rearms (5.692ms)
+✔ gateway forwards real PCM formats, clears interrupted output and stops both legs on abort (286.036ms)
+✔ disposition distinguishes submissions from attempts and gives call exceptions priority (0.5534ms)
+✔ an unreviewed FAQ row retains its citation and never supplies a spoken answer (1.028ms)
+✔ latency uses same-recording annotations and reports unpaired and overlapping turns separately (2.4772ms)
+✔ the mixer includes the cue in the room recording and excludes it from business playback (2.8004ms)
+✔ only one cue is armed after a verified turn, and resumed speech cancels it (1.2829ms)
+✔ only the current verified merchant can retrieve the synthetic review materials (7.5417ms)
+✔ a homophonic merchant name needs independent spelling before materials are disclosed (2.9606ms)
+✔ hangup preserves partial notice and issues one simulated opinion per case revision (5.1366ms)
+✔ material disputes, unresolved questions and callback requests survive subsequent answers (3.3184ms)
+✔ guidance replay / 要补哪一页？ (0.9759ms)
+✔ guidance replay / 具体是第几页呢？ (0.7752ms)
+✔ guidance replay / 授权书要补哪一页？ (1.3039ms)
+✔ guidance replay / 上传到哪里？ (1.3202ms)
+✔ guidance replay / 盖章页从哪里上传？ (0.9488ms)
+✔ guidance replay / 我想问，在哪个入口提交？ (0.7049ms)
+✔ guidance replay / 授权关系缺的是哪一段？ (0.7206ms)
+✔ guidance replay / 需要谁给谁的授权书？ (0.5837ms)
+✔ guidance replay / 材料补齐了就一定能过吗？ (1.0929ms)
+✔ guidance replay / 补了就一定通过吗？ (0.7135ms)
+✔ guidance replay / 公证费要多少？ (0.9601ms)
+✔ guidance replay / 呃，具。 (0.6284ms)
+✔ guidance replay / 要补哪页，传到哪里？ (0.6648ms)
+✔ guidance replay / 发票要补哪一页？ (0.6846ms)
+✔ guidance replay / 不是问页码，我想问传到哪里？ (0.5715ms)
+✔ guidance replay / 不用告诉我传到哪里。 (0.638ms)
+✔ a lookup only clears its follow-up after an evidenced answer plays (2.8398ms)
+✔ the evidence distinguishes the model proposal from the answer used, including across reconnects (2.3908ms)
+✔ timing export shares the recording clock and keeps unverified latencies empty (2.2308ms)
+✔ interrupted playback is partial, stale retries and reconnect cannot advance the wrong item (2.1197ms)
+✔ SQLite retains review progress and output evidence across process restarts (24.6396ms)
+✔ confirmed completion needs an audible prompt and a later merchant confirmation (4.671ms)
+✔ a call preserves its VAD and callback policy, including a configured rollback (1.1722ms)
+✔ QA retains audio locators and separates interrupted and inaudible risks from complete clips (1.7291ms)
+✔ SDP forwarding uses the configured Flash model and never returns the server credential (75.9624ms)
+ℹ tests 44
+ℹ suites 0
+ℹ pass 44
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 53091.6911

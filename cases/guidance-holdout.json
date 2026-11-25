@@ -1,0 +1,62 @@
+[
+  {
+    "text": "请教您一下，具体要补哪一页呢？",
+    "proposed": "chain",
+    "expect": "page"
+  },
+  {
+    "text": "我想确认一下，从哪里提交？",
+    "proposed": "page",
+    "expect": "channel"
+  },
+  {
+    "text": "能麻烦您讲一下，谁给谁的授权书？",
+    "proposed": "result",
+    "expect": "chain"
+  },
+  {
+    "text": "我想咨询一下，补齐后还要审核吗？",
+    "proposed": "chain",
+    "expect": "result"
+  },
+  {
+    "text": "请问上传到哪里？谢谢您。",
+    "proposed": "result",
+    "expect": "channel"
+  },
+  {
+    "text": "麻烦您告诉我，发票要补哪一页？",
+    "proposed": "page",
+    "expect": null
+  },
+  {
+    "text": "不是问页码，我想问传到哪里？",
+    "proposed": "page",
+    "expect": "channel"
+  },
+  {
+    "text": "我没有问具体要补哪一页。",
+    "proposed": "page",
+    "expect": null
+  },
+  {
+    "text": "想确认一下，补哪页，传到哪里？",
+    "proposed": "channel",
+    "expect": null
+  },
+  {
+    "text": "请教您一下，公证费是多少？",
+    "proposed": "result",
+    "expect": null
+  },
+  {
+    "text": "授权书的具体页码是多少呢？",
+    "proposed": "chain",
+    "expect": "page"
+  },
+  {
+    "text": "请问，从哪个页面上传？",
+    "proposed": "page",
+    "expect": "channel"
+  }
+]

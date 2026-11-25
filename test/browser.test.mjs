@@ -176,7 +176,7 @@ async function until(fn, label, ms = 12000) {
 }
 test(
   'browser completes a simulated Flash call across an interruption and plays the recorded evidence',
-  { skip: !chrome && 'Set CHROME_BIN to run the browser test', timeout: 65000 },
+  { skip: !chrome && 'Set CHROME_BIN to run the browser test', timeout: 90000 },
   async (t) => {
     const root = realpathSync(tmpdir()),
       profile = mkdtempSync(join(root, 'zhiyu-browser-'));
@@ -386,5 +386,13 @@ test(
     await text('receipt-status', '未生成书面回执');
     await text('followup-items', '复核联系方式');
     assert.doesNotMatch(await ui('progress'), /盖章页/);
+    const selectCase = id => run('(() => { const s=document.getElementById("case-select");s.value=' +
+      JSON.stringify(id) + ';s.dispatchEvent(new Event("change")); })()');
+    await selectCase('POP-DEMO-035');await click('start');
+    await text('result-summary','外呼次数为零');await text('receipt-opinion','品牌信息');
+    await selectCase('POP-DEMO-046');await click('start');
+    await text('followup-items','外呼任务单');await click('retry-missed');
+    await text('result-summary','二次外呼未接');await text('receipt-opinion','持有人');
+
   }
 );

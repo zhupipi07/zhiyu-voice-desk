@@ -3,10 +3,14 @@ export class Playback {
     this.context = new AudioContext();
     await this.context.resume();
     await this.context.audioWorklet.addModule('/capture.mjs');
-    this.tap = new AudioWorkletNode(this.context, 'playback-tap', { outputChannelCount: [1] });
+    this.tap = new AudioWorkletNode(this.context, 'playback-tap', { numberOfInputs: 2, outputChannelCount: [1] });
     this.tap.connect(this.context.destination);
     this.segments = new Map();
     this.tap.port.onmessage = ({ data }) => {
+      if (data.cueTurn) {
+        this.onCueSound?.(data.cueTurn, data.atMs);
+        return;
+      }
       const s = this.segments.get(data.ended || data.id);
       if (!s) return;
       if (data.ended) {
@@ -21,6 +25,34 @@ export class Playback {
       } else s.truncated = true;
       if (data.samples.some((v) => Math.abs(v) > 300)) s.lastSound = performance.now();
     };
+  }
+  async prepareCue(signal) {
+    const response = await fetch('/listening.wav', {signal});
+    if (response.ok) this.cueBuffer = await this.context.decodeAudioData(await response.arrayBuffer());
+  }
+  playCue(turn) {
+    if (!this.cueBuffer || this.context.state !== 'running') return;
+    this.stopCue();
+    const node = this.context.createBufferSource();
+    this.cueNode = node;
+    node.buffer = this.cueBuffer;
+    node.connect(this.tap, 0, 1);
+    this.tap.port.postMessage({ cueTurn: turn });
+    node.onended = () => {
+      node.disconnect();
+      if (this.cueNode === node) {
+        this.cueNode = null;
+        this.tap.port.postMessage({ cueTurn: null });
+      }
+    };
+    node.start();
+  }
+  stopCue() {
+    if (!this.cueNode) return;
+    this.tap.port.postMessage({ cueTurn: null });
+    this.cueNode.stop();
+    this.cueNode.disconnect();
+    this.cueNode = null;
   }
   record(stream, save, onError) {
     this.recorder = new AudioWorkletNode(this.context, 'review-recorder', { numberOfInputs: 2, outputChannelCount: [1] });
@@ -56,6 +88,16 @@ export class Playback {
     this.segments.set(id, { chunks: [], size: 0, lastSound: 0, truncated: false });
     this.tap.port.postMessage({ id });
   }
+  async playLocal(buffer,id) {
+    if (this.active !== id) return false;
+    this.source?.disconnect();
+    const node = this.context.createBufferSource();
+    this.local = {node,id};
+    node.buffer = buffer;
+    node.connect(this.tap);
+    await new Promise(resolve => {node.onended = resolve;node.start();});
+    return this.active === id;
+  }
   async drain(id) {
     const started = performance.now();
     while (id === this.active && performance.now() - started < 15000) {
@@ -73,6 +115,10 @@ export class Playback {
     const flushed = new Promise((resolve) => {
       s.resolve = resolve;
     });
+    if (this.local?.id === id) {
+      const {node} = this.local; this.local = null;
+      node.stop(); node.disconnect(); this.source?.connect(this.tap);
+    }
     if (this.active === id) {
       this.active = null;
       this.tap.port.postMessage({ id: null });
